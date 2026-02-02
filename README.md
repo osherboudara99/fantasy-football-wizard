@@ -4,6 +4,17 @@
 
 > An LLM-powered fantasy football decision assistant that uses structured NFL analytics data and retrieval-augmented generation (RAG) over real-time fantasy news to provide start/sit recommendations with explanations.
 
+### Architectural Note
+
+This system follows a **backend-orchestrated LLM architecture**:
+
+- The LLM is used strictly for reasoning and explanation
+- Structured data is queried deterministically via Python/Pandas
+- Unstructured data is retrieved via vector search (RAG)
+- All orchestration happens in the backend (not inside the LLM)
+
+This mirrors real-world production LLM systems.
+
 ---
 
 ## 0. Project Definition
@@ -88,6 +99,16 @@ fantasy-football-wizard/
 
 ## 3. Structured Data Ingestion (Stats & Projections)
 
+**Recommended Tools**
+- `nfl_data_py` for raw data ingestion
+- `pandas` for aggregation and feature engineering
+- `pyarrow` / Parquet for efficient local storage
+
+**Why**
+- Structured data requires exact filtering (week, opponent, player)
+- Vector databases are intentionally NOT used for tabular data
+- Pandas allows deterministic, debuggable data access
+
 ### 3.1 Player Stats
 
 **Tool**
@@ -112,6 +133,7 @@ targets
 rush_attempts
 epa
 ```
+
 
 ---
 
@@ -159,6 +181,18 @@ notes
 
 ## 4. Unstructured Data Ingestion (Fantasy News)
 
+**Recommended Tools**
+- `requests` / `httpx` for fetching news
+- `BeautifulSoup` (if scraping is required)
+- `sentence-transformers` for embeddings
+- Chroma for vector search
+
+**Why**
+- News is unstructured, subjective, and time-sensitive
+- Semantic search is required to retrieve relevant context
+- Embeddings are rebuilt frequently to ensure freshness
+
+
 ### 4.1 News Collection
 
 **Sources**
@@ -197,6 +231,16 @@ notes
 
 ## 5. Entity Extraction & Query Parsing
 
+**Recommended Tools**
+- Regex + string matching for MVP
+- Optional lightweight LLM call for edge cases
+
+**Why**
+- Player names and weeks are well-defined entities
+- Avoids unnecessary LLM calls for simple parsing
+- Improves latency and reliability
+
+
 **Goal**
 Extract player names, positions, and week from user input.
 
@@ -207,6 +251,16 @@ Extract player names, positions, and week from user input.
 ---
 
 ## 6. Retrieval Strategy
+
+**Recommended Tools**
+- Pandas DataFrames (initial version)
+- Optional: SQLite / DuckDB for scaling
+
+**Why**
+- Structured data benefits from exact queries
+- Easier to debug and validate than semantic retrieval
+- Matches how analytics systems work in production
+
 
 ### 6.1 Structured Retrieval (No RAG)
 
@@ -222,6 +276,15 @@ Structured data is queried deterministically and injected into the LLM context.
 
 ### 6.2 Unstructured Retrieval (RAG)
 
+**Recommended Tools**
+- Chroma for vector storage
+- Metadata filtering for player name + recency
+
+**Why**
+- News relevance is semantic, not keyword-based
+- Metadata filtering prevents stale or unrelated context
+
+
 **Tools**
 - Chroma
 
@@ -233,6 +296,15 @@ Structured data is queried deterministically and injected into the LLM context.
 ---
 
 ## 7. Context Assembly
+**Recommended Tools**
+- Plain Python functions
+- Pydantic models (optional) for structured context objects
+
+**Why**
+- Context assembly is deterministic business logic
+- Keeping it outside the LLM improves explainability
+- Enables easier testing and debugging
+
 
 Convert raw data into a clean, LLM-friendly comparison format.
 
@@ -263,6 +335,15 @@ Jared Goff:
 
 ## 8. Prompt Engineering
 
+**Recommended Tools**
+- Prompt templates stored as versioned files
+- Optional: Jinja2 for templating
+
+**Why**
+- Prompts are part of system logic
+- Versioning prompts allows experimentation and rollback
+
+
 Define system instructions and a structured response schema.
 
 **Tool**
@@ -292,8 +373,14 @@ Define system instructions and a structured response schema.
 
 ## 9. LLM Inference
 
-**Tool**
-- `llama-cpp-python`
+**Recommended Tools**
+- `llama-cpp-python` for local inference
+- JSON schema validation on outputs
+
+**Why**
+- Local inference reduces cost and dependency risk
+- Schema validation prevents malformed responses
+
 
 **Steps**
 - Load the local LLM
@@ -303,6 +390,15 @@ Define system instructions and a structured response schema.
 ---
 
 ## 10. Streamlit Application
+**Recommended Tools**
+- Streamlit for rapid UI development
+- Session state for caching results
+- Optional: rate limiting on inference calls
+
+**Why**
+- Streamlit accelerates iteration and demos
+- UI should remain thin; business logic stays backend-only
+
 
 UI for interacting with the fantasy assistant.
 **Features**
@@ -348,3 +444,41 @@ Use cron jobs to:
 - Cron jobs for data refresh
 
 ---
+
+## 14. Optional FastAPI Integration
+
+While the current MVP uses Streamlit as both the UI and orchestration layer, adding **FastAPI** can improve separation of concerns and scalability.
+
+### Why Use FastAPI?
+
+FastAPI is **not a replacement** for your pipeline or LLM. Instead, it exposes your backend logic as **HTTP endpoints**, allowing multiple clients (Streamlit, mobile apps, Slack bots, etc.) to interact with your Fantasy Football Wizard.
+
+Benefits include:
+
+- **Separation of Concerns:** Streamlit only handles UI; FastAPI handles pipeline orchestration.
+- **Reusability:** Multiple frontends can call the same backend endpoints.
+- **Scalability:** Easier to deploy and scale in the cloud.
+- **Debugging:** Endpoints can be tested independently with tools like Postman or `curl`.
+- **Resume Value:** Demonstrates experience building a production-ready ML API.
+
+### Example FastAPI Endpoint
+
+```python
+# api/main.py
+from fastapi import FastAPI
+from pydantic import BaseModel
+from pipeline.context_builder import build_context
+from llm.inference import run_llm
+
+app = FastAPI()
+
+class RecommendationRequest(BaseModel):
+    players: list[str]
+    week: int
+
+@app.post("/recommendation")
+def get_recommendation(request: RecommendationRequest):
+    context = build_context(request.players, request.week)
+    response = run_llm(context)
+    return response
+--
