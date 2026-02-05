@@ -1,6 +1,7 @@
-import nfl_data_py as data
+import nflreadpy as nfl 
+import pandas as pd
 
-weekly_data = data.import_weekly_pfr()
 
-print(weekly_data)
+seasonal = nfl.load_player_stats(seasons=True, summary_level='reg').to_pandas()
+weekly = nfl.load_player_stats(summary_level="week").to_pandas()
 
