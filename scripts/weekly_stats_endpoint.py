@@ -34,11 +34,12 @@ class Stats:
         else:
             raise TypeError("Unsupported DataFrame type.")
         
-    def save_parquet(self, file_name: str, stage: Literal["raw", "processed"] = "raw", base_dir: Path | str = "data"):
+    def save_parquet(self, file_name: str, stage: Literal["raw", "processed"] = "raw", base_dir: Path | str = "data/stats"):
         base_dir = Path(base_dir)
 
         stage_dirs = {
-            "raw" : base_dir / "raw" / "stats",
+            "raw" : base_dir / "raw",
+            "staged" : base_dir / "staged",
             "processed" : base_dir / "processed"
         }
 
@@ -57,10 +58,16 @@ class Stats:
         return output_path  
 
 
+def seasonal(remove_nulls:bool, save_file:bool) -> None | str:
+    seasonal = Stats(seasons='all', aggregation='reg')
+    stage = 'raw'
+    if remove_nulls:
+        seasonal.null_removal(columns=['player_id', 'position', 'recent_team']) 
+        stage = 'processed'
+    if save_file:
+        return seasonal.save_parquet(file_name='seasonal_data.parquet', stage=stage)
 
-    
 
-
-
-weekly = nfl.load_player_stats(summary_level="week").to_pandas()
+if __name__ == '__main__':
+    seasonal
 
