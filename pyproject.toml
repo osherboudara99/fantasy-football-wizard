@@ -15,10 +15,11 @@ dependencies = [
   "chromadb",
   "streamlit",
   "pydantic",
+  "python-dotenv>=1.2.1",
 ]
 
 [project.optional-dependencies]
-llm = ["llama-cpp-python"]
+llm = ["llama-cpp-python", "openai"]
 dev = [
   "ipykernel",
   "jupyter",

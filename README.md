@@ -45,7 +45,7 @@ Notes:
 - After activation, `python` and `pip` point to the project environment.
 
 
-# 🧙 Fantasy Football Wizard — Project Checklist
+# Fantasy Football Wizard - Project Checklist
 
 > An LLM-powered fantasy football decision assistant that uses structured NFL analytics data and retrieval-augmented generation (RAG) over real-time fantasy news to provide start/sit recommendations with explanations.
 
@@ -88,7 +88,7 @@ These may be considered future extensions.
 - **UI**: Streamlit
 
 ### Data & Processing
-- **Structured Data**: `nfl_data_py`, CSVs, Pandas
+- **Structured Data**: `nflreadpy`, CSVs, Pandas
 - **Unstructured Data**: Fantasy news articles / blurbs
 - **Scheduling**: Cron jobs or manual refresh scripts
 
@@ -98,54 +98,47 @@ These may be considered future extensions.
 
 ```
 fantasy-football-wizard/
-│
-├── data/
-│   ├── raw/
-│   │   ├── stats/
-│   │   ├── projections/
-│   │   ├── injuries/
-│   │   └── news/
-│   ├── processed/
-│   │   ├── player_stats.parquet
-│   │   ├── projections.parquet
-│   │   └── injuries.parquet
-│
-├── embeddings/
-│   ├── build_embeddings.py
-│   └── chroma_db/
-│
-├── retrieval/
-│   ├── news_retriever.py
-│   └── filters.py
-│
-├── llm/
-│   ├── model_loader.py
-│   ├── prompt_templates.py
-│   └── inference.py
-│
-├── pipeline/
-│   ├── entity_extraction.py
-│   ├── context_builder.py
-│   └── decision_engine.py
-│
-├── app/
-│   └── streamlit_app.py
-│
-├── scripts/
-│   ├── refresh_stats.py
-│   ├── refresh_news.py
-│   └── refresh_embeddings.py
-│
-├── README.md
-└── requirements.txt
+|-- data/
+|   |-- raw/
+|   |   |-- stats/
+|   |   |-- projections/
+|   |   |-- injuries/
+|   |   `-- news/
+|   `-- processed/
+|       |-- player_stats.parquet
+|       |-- projections.parquet
+|       `-- injuries.parquet
+|-- embeddings/
+|   |-- build_embeddings.py
+|   `-- chroma_db/
+|-- retrieval/
+|   |-- news_retriever.py
+|   `-- filters.py
+|-- llm/
+|   |-- model_loader.py
+|   |-- prompt_templates.py
+|   `-- inference.py
+|-- pipeline/
+|   |-- entity_extraction.py
+|   |-- context_builder.py
+|   `-- decision_engine.py
+|-- app/
+|   `-- streamlit_app.py
+|-- scripts/
+|   |-- refresh_stats.py
+|   |-- refresh_news.py
+|   `-- refresh_embeddings.py
+|-- README.md
+`-- requirements.txt
 ```
+
 
 ---
 
 ## 3. Structured Data Ingestion (Stats & Projections)
 
 **Recommended Tools**
-- `nfl_data_py` for raw data ingestion
+- `nflreadpy` for raw data ingestion
 - `pandas` for aggregation and feature engineering
 - `pyarrow` / Parquet for efficient local storage
 
@@ -157,7 +150,7 @@ fantasy-football-wizard/
 ### 3.1 Player Stats
 
 **Tool**
-- `nfl_data_py`
+- `nflreadpy`
 
 **Steps**
 - Pull weekly player statistics
@@ -246,7 +239,7 @@ notes
 - Beat reporter articles
 
 **Steps**
-- Fetch news from the last 7–10 days only
+- Fetch news from the last 7-10 days only
 - Tag each item with player name and date
 - Store raw text data
 
@@ -335,7 +328,7 @@ Structured data is queried deterministically and injected into the LLM context.
 
 **Steps**
 - Query embeddings by player name
-- Filter results by recency (≤ 7 days)
+- Filter results by recency (<= 7 days)
 - Retrieve top-k relevant news chunks
 
 ---
@@ -361,7 +354,7 @@ PLAYER COMPARISON
 Jordan Love:
 - Avg fantasy points (last 3 weeks): 18.4
 - Projected points: 17.1
-- Injury: Questionable → Full practice Friday
+- Injury: Questionable -> Full practice Friday
 - Recent news:
   - "Packers plan to stay aggressive..."
 
