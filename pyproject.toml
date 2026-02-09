@@ -1,0 +1,27 @@
+[project]
+name = "fantasy-football-wizard"
+version = "0.1.0"
+description = "LLM-powered fantasy football decision assistant."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "pandas",
+  "polars",
+  "pyarrow",
+  "nflreadpy",
+  "requests",
+  "beautifulsoup4",
+  "sentence-transformers",
+  "chromadb",
+  "streamlit",
+  "pydantic",
+]
+
+[project.optional-dependencies]
+llm = ["llama-cpp-python"]
+dev = [
+  "ipykernel",
+  "jupyter",
+  "ruff",
+  "pytest",
+]

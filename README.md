@@ -1,5 +1,50 @@
 # Fantasy_Football_Wizard
 
+## Quickstart (uv)
+
+1. Install `uv` and ensure it is on your PATH.
+2. Run the setup script:
+
+```powershell
+.\scripts\setup_uv.ps1
+```
+
+3. Activate the environment in a new shell:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+Notes:
+- Dependencies are defined in `pyproject.toml`.
+- `scripts/refresh_stats.py` currently imports `nflreadpy`, so `nflreadpy` is included in the default deps.
+
+## Workflow (uv)
+
+1. Create or update the environment (run when deps change):
+
+```powershell
+.\scripts\setup_uv.ps1
+```
+
+2. Activate the environment:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+3. Run scripts or the app:
+
+```powershell
+python scripts\refresh_stats.py
+```
+
+Notes:
+- `uv venv` creates `.venv` in the project root.
+- `uv sync` installs dependencies from `pyproject.toml` into `.venv`.
+- After activation, `python` and `pip` point to the project environment.
+
+
 # 🧙 Fantasy Football Wizard — Project Checklist
 
 > An LLM-powered fantasy football decision assistant that uses structured NFL analytics data and retrieval-augmented generation (RAG) over real-time fantasy news to provide start/sit recommendations with explanations.
