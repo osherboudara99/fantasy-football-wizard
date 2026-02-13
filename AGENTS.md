@@ -20,7 +20,7 @@ This project uses a backend-orchestrated LLM pipeline: structured NFL data is qu
 - `uv venv --python 3.11` creates a local virtual environment in `.venv/`.
 - `uv sync` installs dependencies from `pyproject.toml` into `.venv/`.
 - `./scripts/setup_uv.sh` is a convenience wrapper for `uv venv` + `uv sync` on bash.
-- `python scripts\refresh_stats.py` refreshes weekly and seasonal stats and writes Parquet to `data/stats/`.
+- `python scripts/refresh_stats.py` (Linux/macOS) or `python scripts\refresh_stats.py` (Windows) refreshes weekly and seasonal stats and writes Parquet to `data/stats/`.
 - `pytest` runs the test suite (none committed yet).
 - `ruff check .` runs linting (optional, dev dependency).
 
