@@ -3,46 +3,40 @@
 ## Quickstart (uv)
 
 1. Install `uv` and ensure it is on your PATH.
-2. Run the setup script:
+2. Create the environment and install dependencies:
 
 ```powershell
-.\scripts\setup_uv.ps1
+uv venv --python 3.11
+uv sync
 ```
 
-3. Activate the environment in a new shell:
+3. Activate the environment:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 ```
 
 Notes:
-- Dependencies are defined in `pyproject.toml`.
-- `scripts/refresh_stats.py` currently imports `nflreadpy`, so `nflreadpy` is included in the default deps.
+- Dependencies are defined in `pyproject.toml`; `uv sync` regenerates `uv.lock`.
+- Copy `.env.example` to `.env` and fill in `ANTHROPIC_API_KEY` (optionally `ANTHROPIC_MODEL`) — never commit `.env`.
 
-## Workflow (uv)
+---
 
-1. Create or update the environment (run when deps change):
+# Development Roadmap
 
-```powershell
-.\scripts\setup_uv.ps1
-```
+Ordered execution plan. Each phase references the detailed sections below; a phase is complete when its done-check passes. Work phases in order.
 
-2. Activate the environment:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-```
-
-3. Run scripts or the app:
-
-```powershell
-python scripts\refresh_stats.py
-```
-
-Notes:
-- `uv venv` creates `.venv` in the project root.
-- `uv sync` installs dependencies from `pyproject.toml` into `.venv`.
-- After activation, `python` and `pip` point to the project environment.
+| Phase | Scope | Refs | Done when |
+|-------|-------|------|-----------|
+| **0. Environment & LLM core** *(~done)* | uv env, deps, `llm/interface.py` on the Anthropic SDK, `.env.example` | §1, §9 | Smoke test (`python llm\interface.py`) returns a validated `Recommendation` |
+| **1. Structured data ingestion** | Rebuild `scripts/refresh_stats.py` on nflreadpy (stats, snap counts, xFP, injuries, depth charts, schedules); Sleeper player-dump + projections fetchers; Parquet in `data/` via raw→staged→processed; join on `load_ff_playerids()` | §1.5, §3 | One command refreshes all Parquet artifacts for the current week |
+| **2. Context builder** | `pipeline/entity_extraction.py` (regex player/week parsing); `pipeline/context_builder.py` producing LLM-ready comparison text from Parquet | §5–§7 | `build_context(["Player A", "Player B"], week)` returns the §7 format; unit-tested with fixture data |
+| **3. Decision engine end-to-end** | `pipeline/decision_engine.py`: context builder → `run_llm()` → `Recommendation` | §8–§9 | A real two-player question answers correctly from the terminal |
+| **4. FastAPI backend** | `api/main.py` with `POST /recommendation` and `GET /players`; `.env` loaded at startup; CORS for frontend origin | §14 | `curl` returns a recommendation JSON |
+| **5. React frontend** | `frontend/` Vite app: player pickers, question input, recommendation + confidence display | §10 | Full flow works locally against FastAPI |
+| **6. News RAG** | `scripts/refresh_news.py` (RSS feeds); `embeddings/build_embeddings.py` (sentence-transformers → Chroma, player-ID + date metadata); `retrieval/news_retriever.py` (top-k, ≤7-day filter); wire into context builder | §4, §6.2 | Recommendations cite recent news |
+| **7. Deployment** | Dockerfile (no torch in API image); Cloud Run service; GCS-backed data/Chroma; Cloud Run Jobs + Scheduler for refresh; Cloudflare Pages frontend | §13 | Public URL serves a recommendation |
+| **8. Evaluation** | Log recommendations vs FantasyPros consensus and actual weekly outcomes | §12 | Week-over-week agreement tracking exists |
 
 
 # Fantasy Football Wizard - Project Checklist
@@ -76,21 +70,53 @@ Build a **decision-support system** (not just a chatbot) for fantasy football st
 
 These may be considered future extensions.
 
+**Promising future extension**: league-aware advice via the Sleeper API (free, read-only, no auth) — pull actual rosters, matchups, and waiver trends from `GET /v1/league/{league_id}/...` so recommendations account for the user's real team instead of manually entered players.
+
 ---
 
 ## 1. Tech Stack
 
 ### Core
 - **Python 3.10+**
-- **LLM**: Phi-3-mini (via `llama-cpp-python`)
+- **LLM**: Claude API (`anthropic` SDK) — `claude-haiku-4-5` default, overridable via `ANTHROPIC_MODEL` (e.g. `claude-sonnet-5` for harder reasoning)
 - **Embeddings**: `sentence-transformers`
 - **Vector Database**: Chroma (local)
-- **UI**: Streamlit
+- **UI**: React frontend + FastAPI backend (see section 14)
 
 ### Data & Processing
-- **Structured Data**: `nflreadpy`, CSVs, Pandas
-- **Unstructured Data**: Fantasy news articles / blurbs
+- **Structured Data**: `nflreadpy` (nflverse), Sleeper API, Pandas/Polars
+- **Unstructured Data**: Fantasy news via free RSS/JSON feeds (ESPN, Yahoo, RotoBaller)
 - **Scheduling**: Cron jobs or manual refresh scripts
+
+---
+
+## 1.5 Data Sources (verified free, 2026)
+
+All primary sources below are free and require no paid subscription. Sources marked "no key" need no signup at all.
+
+| Data | Primary Source | Access | Notes |
+|------|---------------|--------|-------|
+| Weekly/seasonal player stats | `nflreadpy.load_player_stats()` | Python pkg, no key | Already in use |
+| Snap counts | `nflreadpy.load_snap_counts()` | no key | PFR-sourced, 2012+ |
+| Next Gen Stats (adv. passing/rushing/receiving) | `nflreadpy.load_nextgen_stats()` | no key | 2016+ |
+| Opportunity / expected fantasy points | `nflreadpy.load_ff_opportunity()` | no key | Target share, air yards, xFP — 2006+ |
+| Official injury reports (practice participation) | `nflreadpy.load_injuries()` | no key | 2009+, weekly cadence |
+| Real-time injury status | Sleeper `GET /v1/players/nfl` | REST, no key | `injury_status` per player; ~5MB, fetch 1x/day |
+| Depth charts | `nflreadpy.load_depth_charts()` | no key | 2001+ |
+| Projections (weekly) | Sleeper `api.sleeper.com/projections/nfl/{season}/{week}` | REST, no key | Undocumented but stable; PPR/half/standard |
+| Consensus rankings (ECR) | `nflreadpy.load_ff_rankings()` | no key | FantasyPros ECR via ffverse |
+| Player ID / name normalization | `nflreadpy.load_ff_playerids()` | no key | Maps Sleeper/ESPN/Yahoo/PFR/GSIS IDs — use this instead of fuzzy name matching |
+| Schedules + Vegas lines | `nflreadpy.load_schedules()` | no key | Includes spread/total — useful game-script signal |
+| Trending adds/drops | Sleeper `/v1/players/nfl/trending/{add\|drop}` | REST, no key | Community waiver signal |
+| News (RAG corpus) | ESPN RSS (`espn.com/espn/rss/nfl/news`), Yahoo Sports NFL RSS, RotoBaller free feeds (XML/JSON/RSS) | RSS/JSON, no key | Prefer feeds over scraping |
+| My league rosters/matchups | Sleeper `/v1/league/{id}/...` | REST, no key | Read-only, no auth; rate limit <1000 calls/min |
+
+**Secondary / fallback sources**
+- FantasyPros CSV export (manual download) — projections backup
+- ESPN hidden fantasy API (`fantasy.espn.com/apis/v3/games/ffl/...`) + `espn-api` Python lib — ownership %, ESPN league integration (needs cookies for private leagues); unofficial, may break without notice
+- Yahoo Fantasy Sports API — official but OAuth-heavy; only if a Yahoo league must be supported
+
+**Deliberately excluded**: Fantasy Nerds ($74.95/yr), SportsDataIO, MySportsFeeds (trial-gated) — paid; Rotoworld scraping — fragile, feeds above cover it.
 
 ---
 
@@ -98,12 +124,9 @@ These may be considered future extensions.
 
 ```
 fantasy-football-wizard/
-|-- data/
+|-- data/                  # local artifacts (gitignored; GCS in prod)
 |   |-- raw/
-|   |   |-- stats/
-|   |   |-- projections/
-|   |   |-- injuries/
-|   |   `-- news/
+|   |-- staged/
 |   `-- processed/
 |       |-- player_stats.parquet
 |       |-- projections.parquet
@@ -115,22 +138,28 @@ fantasy-football-wizard/
 |   |-- news_retriever.py
 |   `-- filters.py
 |-- llm/
-|   |-- model_loader.py
-|   |-- prompt_templates.py
-|   `-- inference.py
+|   |-- interface.py       # exists — Anthropic SDK + structured outputs
+|   `-- prompt_templates.py
 |-- pipeline/
 |   |-- entity_extraction.py
 |   |-- context_builder.py
 |   `-- decision_engine.py
-|-- app/
-|   `-- streamlit_app.py
+|-- api/
+|   `-- main.py            # FastAPI app
+|-- frontend/              # React (Vite) app
 |-- scripts/
 |   |-- refresh_stats.py
 |   |-- refresh_news.py
 |   `-- refresh_embeddings.py
-|-- README.md
-`-- requirements.txt
+|-- tests/                 # pytest, test_*.py
+|-- Dockerfile             # API image (Phase 7; no torch)
+|-- .env.example
+|-- pyproject.toml
+|-- uv.lock
+`-- README.md
 ```
+
+Only `llm/interface.py` exists today — everything else is created phase-by-phase per the roadmap.
 
 
 ---
@@ -154,6 +183,7 @@ fantasy-football-wizard/
 
 **Steps**
 - Pull weekly player statistics
+- Enrich with snap counts (`load_snap_counts`), opportunity/xFP (`load_ff_opportunity`), and Next Gen Stats (`load_nextgen_stats`)
 - Aggregate:
   - Last 3 weeks
   - Season averages
@@ -178,13 +208,13 @@ epa
 ### 3.2 Fantasy Projections
 
 **Sources**
-- FantasyPros CSV exports
-- Sleeper API
-- ESPN / Yahoo (manual CSV)
+- Sleeper projections endpoint (primary): `https://api.sleeper.com/projections/nfl/{season}/{week}?season_type=regular` — free, no key, returns per-player projections for PPR/half/standard
+- `nflreadpy.load_ff_rankings()` — FantasyPros expert consensus rankings (ECR)
+- FantasyPros CSV export (manual fallback)
 
 **Steps**
-- Normalize player names across sources
-- Store projections by week
+- Join sources on canonical player IDs via `nflreadpy.load_ff_playerids()` (maps Sleeper/ESPN/Yahoo/GSIS/PFR IDs) — avoid fuzzy name matching
+- Store projections by week and source
 
 **Key Fields**
 ```
@@ -199,11 +229,12 @@ source
 ### 3.3 Injury Reports
 
 **Sources**
-- Official NFL injury reports
-- FantasyPros injury feed
+- `nflreadpy.load_injuries()` — official NFL injury reports with practice participation (weekly cadence)
+- Sleeper `GET /v1/players/nfl` — `injury_status` / `injury_note` per player for intra-week updates (daily cadence)
 
 **Steps**
 - Parse practice participation reports
+- Overlay Sleeper's real-time status on top of the official weekly report
 - Store both structured fields and raw text notes
 
 **Key Fields**
@@ -234,13 +265,15 @@ notes
 ### 4.1 News Collection
 
 **Sources**
-- FantasyPros blurbs
-- Rotoworld
-- Beat reporter articles
+- ESPN NFL news RSS: `https://www.espn.com/espn/rss/nfl/news` — no key
+- Yahoo Sports NFL RSS: `https://sports.yahoo.com/nfl/rss` — no key
+- RotoBaller free player news feeds (XML/JSON/RSS) — player-tagged blurbs, ideal RAG input
+- Sleeper trending adds/drops (`/v1/players/nfl/trending/add`) — community signal to prioritize which players' news matters this week
 
 **Steps**
+- Prefer structured feeds over HTML scraping (BeautifulSoup only as last resort)
 - Fetch news from the last 7-10 days only
-- Tag each item with player name and date
+- Tag each item with player ID (via `load_ff_playerids`) and date
 - Store raw text data
 
 ---
@@ -259,9 +292,10 @@ notes
 **Metadata Example**
 ```
 {
-  "player": "Jordan Love",
-  "date": "2024-12-01",
-  "source": "FantasyPros"
+  "player_id": "4046",          // canonical ID via load_ff_playerids()
+  "player_name": "Jordan Love",
+  "date": "2026-09-01",
+  "source": "ESPN RSS"
 }
 ```
 
@@ -412,31 +446,30 @@ Define system instructions and a structured response schema.
 ## 9. LLM Inference
 
 **Recommended Tools**
-- `llama-cpp-python` for local inference
-- JSON schema validation on outputs
+- Claude API via the `anthropic` SDK (see `llm/interface.py`)
+- Structured outputs (`client.messages.parse` + Pydantic) — the API guarantees the response matches the schema, no JSON-repair fallback needed
 
 **Why**
-- Local inference reduces cost and dependency risk
-- Schema validation prevents malformed responses
-
+- `claude-haiku-4-5` ($1/$5 per MTok) is the best performance-per-dollar for this workload: short assembled context in, small structured recommendation out (~half a cent per query)
+- `ANTHROPIC_MODEL=claude-sonnet-5` is a drop-in upgrade for harder reasoning
+- Structured outputs eliminate malformed-response handling entirely
 
 **Steps**
-- Load the local LLM
-- Inject assembled context
-- Parse structured output for display
+- Assemble context (section 7), call `run_llm(context, question)`
+- Receive a validated `Recommendation` (start, bench, confidence, key_factors, risk_factors)
+- Return it from the API layer for display
 
 ---
 
-## 10. Streamlit Application
+## 10. React Frontend
+
 **Recommended Tools**
-- Streamlit for rapid UI development
-- Session state for caching results
-- Optional: rate limiting on inference calls
+- React (Vite) frontend in `frontend/`
+- FastAPI backend (section 14) as the only thing the frontend talks to
 
 **Why**
-- Streamlit accelerates iteration and demos
-- UI should remain thin; business logic stays backend-only
-
+- Clean separation: React handles UI only; all orchestration, data access, and LLM calls live in the Python backend
+- The frontend never sees the Anthropic API key — it only calls FastAPI endpoints
 
 UI for interacting with the fantasy assistant.
 **Features**
@@ -453,18 +486,19 @@ UI for interacting with the fantasy assistant.
 
 ## 11. Data Refresh Strategy
 
-| Data Type | Refresh Frequency |
-|---------|------------------|
-| Player Stats | Weekly |
-| Projections | Weekly |
-| Injury Reports | Daily |
-| News | Daily |
-| Embeddings | On news refresh |
+| Data Type | Source | Refresh Frequency |
+|---------|--------|------------------|
+| Player Stats (+ snaps, xFP, NGS) | nflreadpy | Weekly |
+| Projections | Sleeper endpoint / `load_ff_rankings` | Weekly |
+| Injury Reports (official) | `load_injuries` | Daily during season |
+| Injury Status (real-time) + player dump | Sleeper `/v1/players/nfl` | Daily (~5MB, don't over-fetch) |
+| News | RSS/JSON feeds | Daily |
+| Trending adds/drops | Sleeper | Daily |
+| Embeddings | — | On news refresh |
 
-Use cron jobs to:
-- Refresh stats weekly
-- Refresh news daily
-- Rebuild embeddings after news updates
+Scheduling:
+- Local dev: run refresh scripts manually or via OS scheduler
+- Production: Cloud Run Jobs triggered by Cloud Scheduler (see §13) — stats weekly, news daily, embeddings rebuilt after each news refresh
 
 ---
 ## 12. Evaluation (Lightweight)
@@ -477,23 +511,28 @@ Use cron jobs to:
 ---
 ## 13. Deployment
 
-- Local Streamlit deployment
-- Optional cloud VM (AWS Lightsail / EC2)
-- Cron jobs for data refresh
+- Local dev: FastAPI (`uvicorn`) + React dev server (Vite)
+- **Frontend**: Cloudflare Pages — free tier, unlimited static bandwidth, deploys the Vite build on git push
+- **Backend**: Dockerized FastAPI on GCP Cloud Run — scale-to-zero, free tier (~2M requests/month) covers personal use
+- **Data refresh**: Cloud Run Jobs + Cloud Scheduler (replaces local cron); artifacts written to a GCS bucket
+- **State caveat**: Cloud Run is stateless/ephemeral — Parquet files and `chroma_db/` must live in GCS (FUSE volume mount or download-on-start), not on local disk
+- **Cold-start caveat**: keep `sentence-transformers` (torch) out of the request path — embed at refresh time in the Cloud Run Job; the API container should only *query* Chroma. Otherwise scale-to-zero cold starts take tens of seconds and the image balloons past 2GB.
+- Fallback if statefulness gets annoying: a small always-on VM (Fly.io / Lightsail, ~$5/mo) with a persistent volume
 
 ---
 
-## 14. Optional FastAPI Integration
+## 14. FastAPI Backend (required)
 
-While the current MVP uses Streamlit as both the UI and orchestration layer, adding **FastAPI** can improve separation of concerns and scalability.
+With a React frontend, **FastAPI is the required backend layer** — it exposes the pipeline as HTTP endpoints the frontend consumes.
 
-### Why Use FastAPI?
+### Why FastAPI?
 
-FastAPI is **not a replacement** for your pipeline or LLM. Instead, it exposes your backend logic as **HTTP endpoints**, allowing multiple clients (Streamlit, mobile apps, Slack bots, etc.) to interact with your Fantasy Football Wizard.
+FastAPI is **not a replacement** for your pipeline or LLM. It exposes your backend logic as **HTTP endpoints**, allowing the React app (and later other clients — mobile, Slack bots) to interact with the Fantasy Football Wizard.
 
 Benefits include:
 
-- **Separation of Concerns:** Streamlit only handles UI; FastAPI handles pipeline orchestration.
+- **Separation of Concerns:** React only handles UI; FastAPI handles pipeline orchestration.
+- **Security:** the Anthropic API key stays server-side.
 - **Reusability:** Multiple frontends can call the same backend endpoints.
 - **Scalability:** Easier to deploy and scale in the cloud.
 - **Debugging:** Endpoints can be tested independently with tools like Postman or `curl`.
@@ -506,7 +545,7 @@ Benefits include:
 from fastapi import FastAPI
 from pydantic import BaseModel
 from pipeline.context_builder import build_context
-from llm.inference import run_llm
+from llm.interface import run_llm
 
 app = FastAPI()
 
@@ -519,4 +558,4 @@ def get_recommendation(request: RecommendationRequest):
     context = build_context(request.players, request.week)
     response = run_llm(context)
     return response
---
+```
