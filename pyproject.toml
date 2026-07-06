@@ -13,13 +13,14 @@ dependencies = [
   "beautifulsoup4",
   "sentence-transformers",
   "chromadb",
-  "streamlit",
+  "fastapi",
+  "uvicorn",
   "pydantic",
+  "anthropic",
   "python-dotenv>=1.2.1",
 ]
 
 [project.optional-dependencies]
-llm = ["llama-cpp-python", "openai"]
 dev = [
   "ipykernel",
   "jupyter",
