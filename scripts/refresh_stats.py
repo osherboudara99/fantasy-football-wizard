@@ -33,10 +33,12 @@ LAST_N_WEEKS = 3
 
 
 def log(msg: str) -> None:
+    """Print a progress message prefixed with the script name."""
     print(f"[refresh_stats] {msg}")
 
 
 def _write(df: pl.DataFrame, directory: Path, name: str) -> pl.DataFrame:
+    """Write `df` to `directory/name.parquet`, creating the directory if needed."""
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{name}.parquet"
     df.write_parquet(path)
@@ -53,6 +55,8 @@ def resolve_season_week(season: int | None, week: int | None) -> tuple[int, int]
     if season is not None and week is not None:
         return season, week
 
+    # REG only: postseason week numbers don't line up with Sleeper's regular-season
+    # projection weeks (1-18), so playoff games would resolve to a week that doesn't exist there.
     schedules = nfl.load_schedules(seasons=True)
     schedules = schedules.filter(
         (pl.col("game_type") == "REG") & pl.col("gameday").is_not_null()
@@ -63,6 +67,8 @@ def resolve_season_week(season: int | None, week: int | None) -> tuple[int, int]
         raise RuntimeError(
             "No played regular-season games found; pass --season/--week explicitly"
         )
+    # During the off-season this falls back to the last week of the prior season,
+    # which is what "current" should mean until the next season's games start.
     latest = played.sort("gameday", descending=True).row(0, named=True)
     return season or latest["season"], week or latest["week"]
 
@@ -72,6 +78,7 @@ def resolve_season_week(season: int | None, week: int | None) -> tuple[int, int]
 # ---------------------------------------------------------------------------
 
 def fetch_sleeper_players() -> pl.DataFrame:
+    """Fetch Sleeper's full player dump, keeping only players with a gsis_id."""
     data = requests.get(SLEEPER_PLAYERS_URL, timeout=30).json()
     rows = [
         {field: player.get(field) for field in SLEEPER_PLAYER_FIELDS}
@@ -82,6 +89,7 @@ def fetch_sleeper_players() -> pl.DataFrame:
 
 
 def fetch_sleeper_projections(season: int, week: int) -> pl.DataFrame:
+    """Fetch Sleeper's weekly projections (PPR/half-PPR/standard) for one season/week."""
     url = SLEEPER_PROJECTIONS_URL.format(season=season, week=week)
     resp = requests.get(url, params={"season_type": "regular"}, timeout=30)
     resp.raise_for_status()
@@ -90,6 +98,8 @@ def fetch_sleeper_projections(season: int, week: int) -> pl.DataFrame:
         stats = entry.get("stats") or {}
         player = entry.get("player") or {}
         first, last = player.get("first_name"), player.get("last_name")
+        # Sleeper's projection entries don't include the FantasyPros ID needed to
+        # join with ECR rankings, so carry name/position/team here as a fallback.
         rows.append({
             "sleeper_id": entry.get("player_id"),
             "season": season,
@@ -105,6 +115,7 @@ def fetch_sleeper_projections(season: int, week: int) -> pl.DataFrame:
 
 
 def fetch_raw(season: int, week: int) -> dict[str, pl.DataFrame]:
+    """Fetch every nflreadpy + Sleeper source for the given season/week and write raw/*.parquet."""
     log(f"fetching raw sources for season={season} week={week}")
     raw = {
         "player_stats": nfl.load_player_stats(seasons=season, summary_level="week"),
@@ -131,6 +142,7 @@ def fetch_raw(season: int, week: int) -> dict[str, pl.DataFrame]:
 # ---------------------------------------------------------------------------
 
 def _pfr_to_gsis(ff_playerids: pl.DataFrame) -> pl.DataFrame:
+    """snap_counts is keyed by pfr_player_id, not gsis_id, so bridge through ff_playerids."""
     return (
         ff_playerids.select(["pfr_id", "gsis_id"])
         .filter(pl.col("pfr_id").is_not_null() & pl.col("gsis_id").is_not_null())
@@ -139,6 +151,7 @@ def _pfr_to_gsis(ff_playerids: pl.DataFrame) -> pl.DataFrame:
 
 
 def build_staged_player_stats(raw: dict[str, pl.DataFrame]) -> pl.DataFrame:
+    """Join weekly player_stats with snap counts, xFP, and Next Gen Stats on (player_id, season, week)."""
     stats = raw["player_stats"].select([
         "player_id", "player_display_name", "position", "team", "opponent_team",
         "season", "week", "season_type", "targets", "receptions", "carries",
@@ -156,6 +169,8 @@ def build_staged_player_stats(raw: dict[str, pl.DataFrame]) -> pl.DataFrame:
         .rename({"gsis_id": "player_id", "offense_pct": "snap_percentage"})
     )
 
+    # ff_opportunity ships season/week as String/Float64 (unlike every other nflverse
+    # table here, which uses Int32) - cast to match player_stats before joining on them.
     xfp = raw["ff_opportunity"].select([
         "player_id", "season", "week", "total_fantasy_points_exp",
     ]).with_columns([
@@ -187,7 +202,10 @@ def build_staged_player_stats(raw: dict[str, pl.DataFrame]) -> pl.DataFrame:
 
 
 def build_staged_injuries(raw: dict[str, pl.DataFrame], season: int, week: int) -> pl.DataFrame:
+    """Overlay Sleeper's real-time injury status on top of the official weekly report."""
     injuries_df = raw["injuries"]
+    # date_modified is present for some season vintages but not others upstream;
+    # add it as null rather than letting the later select() fail.
     if "date_modified" not in injuries_df.columns:
         injuries_df = injuries_df.with_columns(pl.lit(None, dtype=pl.String).alias("date_modified"))
 
@@ -212,12 +230,16 @@ def build_staged_injuries(raw: dict[str, pl.DataFrame], season: int, week: int) 
         .rename({"gsis_id": "player_id"})
     )
 
+    # full join: the official weekly report only covers players teams flagged that
+    # week, while Sleeper's dump is a live snapshot of every player - neither side
+    # is a superset, so an inner/left join would silently drop rows from one side.
     return official.join(
         sleeper, on="player_id", how="full", coalesce=True, suffix="_sleeper"
     )
 
 
 def build_staged_projections(raw: dict[str, pl.DataFrame]) -> pl.DataFrame:
+    """Join Sleeper weekly projections with FantasyPros ECR rankings, both mapped to gsis_id."""
     ids = raw["ff_playerids"].select(["sleeper_id", "fantasypros_id", "gsis_id"])
 
     sleeper_ids = ids.select(["sleeper_id", "gsis_id"]).filter(
@@ -225,12 +247,16 @@ def build_staged_projections(raw: dict[str, pl.DataFrame]) -> pl.DataFrame:
     ).unique(subset=["sleeper_id"])
     sleeper_proj = (
         raw["sleeper_projections"]
+        # Sleeper's own player_id is numeric except for team defenses, which use the
+        # team abbreviation (e.g. "SEA") instead - strict=False turns those into
+        # null rather than failing the whole load; ff_playerids doesn't map DSTs anyway.
         .with_columns(pl.col("sleeper_id").cast(pl.Int64, strict=False))
         .join(sleeper_ids, on="sleeper_id", how="left")
         .rename({"gsis_id": "player_id"})
         .drop("sleeper_id")
     )
 
+    # ff_playerids.fantasypros_id is String but ff_rankings ships it as Int64 - align types to join.
     fp_ids = ids.select(["fantasypros_id", "gsis_id"]).filter(
         pl.col("fantasypros_id").is_not_null()
     ).with_columns(pl.col("fantasypros_id").cast(pl.Int64)).unique(subset=["fantasypros_id"])
@@ -248,6 +274,7 @@ def build_staged_projections(raw: dict[str, pl.DataFrame]) -> pl.DataFrame:
 
 
 def build_staged(raw: dict[str, pl.DataFrame], season: int, week: int) -> dict[str, pl.DataFrame]:
+    """Build and persist all staged/*.parquet tables from the raw sources."""
     staged = {
         "player_stats": build_staged_player_stats(raw),
         "injuries": build_staged_injuries(raw, season, week),
@@ -263,7 +290,10 @@ def build_staged(raw: dict[str, pl.DataFrame], season: int, week: int) -> dict[s
 # ---------------------------------------------------------------------------
 
 def build_processed_player_stats(staged: pl.DataFrame, season: int, week: int) -> pl.DataFrame:
+    """Collapse weekly staged stats into one row per player: last-3-week and season averages."""
     season_to_date = staged.filter((pl.col("season") == season) & (pl.col("week") <= week))
+    # "last 3 weeks" = the 3 weeks up to and including the target week (bye weeks
+    # simply thin the window since there's no row for that player that week).
     last3 = season_to_date.filter(pl.col("week") > week - LAST_N_WEEKS)
 
     aggregates = last3.group_by("player_id").agg([
@@ -301,11 +331,14 @@ def build_processed_player_stats(staged: pl.DataFrame, season: int, week: int) -
 
 
 def build_processed_injuries(staged: pl.DataFrame) -> pl.DataFrame:
+    """Flatten staged injuries into the final per-player status/practice_level/notes columns."""
     return staged.filter(pl.col("player_id").is_not_null()).select([
         "player_id",
         pl.coalesce(["player_name", "full_name"]).alias("player_name"),
         pl.coalesce(["position", "position_sleeper"]).alias("position"),
         pl.coalesce(["team", "team_sleeper"]).alias("team"),
+        # Most players have no injury report at all - absence of a status means healthy,
+        # not unknown, so downstream context building doesn't need its own null-handling.
         pl.coalesce(["injury_status", "report_status"]).fill_null("Healthy").alias("status"),
         pl.coalesce(["practice_status", "practice_participation"]).alias("practice_level"),
         pl.coalesce(["date_modified", "injury_start_date"]).alias("report_date"),
@@ -314,12 +347,15 @@ def build_processed_injuries(staged: pl.DataFrame) -> pl.DataFrame:
 
 
 def build_processed_projections(staged: pl.DataFrame) -> pl.DataFrame:
+    """Flatten staged projections into the final per-player projected_points/ecr_rank columns."""
     return staged.filter(pl.col("player_id").is_not_null()).select([
         "player_id",
         pl.coalesce(["player_name", "player_name_ecr"]).alias("player_name"),
         pl.coalesce(["position", "pos"]).alias("position"),
         pl.coalesce(["team", "team_ecr"]).alias("team"),
         "season", "week",
+        # PPR is this app's default scoring format (README §9); half-PPR/standard
+        # are kept alongside for a future league-scoring-aware context builder.
         pl.col("pts_ppr").alias("projected_points"),
         pl.lit("sleeper").alias("source"),
         "pts_half_ppr", "pts_std",
@@ -328,6 +364,7 @@ def build_processed_projections(staged: pl.DataFrame) -> pl.DataFrame:
 
 
 def build_processed(staged: dict[str, pl.DataFrame], season: int, week: int) -> None:
+    """Build and persist all processed/*.parquet tables from the staged tables."""
     processed = {
         "player_stats": build_processed_player_stats(staged["player_stats"], season, week),
         "injuries": build_processed_injuries(staged["injuries"]),
@@ -342,6 +379,7 @@ def build_processed(staged: dict[str, pl.DataFrame], season: int, week: int) -> 
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    """CLI entrypoint: resolve season/week, then run raw -> staged -> processed end to end."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--season", type=int, default=None)
     parser.add_argument("--week", type=int, default=None)
