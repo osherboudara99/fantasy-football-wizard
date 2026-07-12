@@ -29,7 +29,7 @@ Ordered execution plan. Each phase references the detailed sections below; a pha
 | Phase | Scope | Refs | Done when |
 |-------|-------|------|-----------|
 | **0. Environment & LLM core** *(~done)* | uv env, deps, `llm/interface.py` on the Anthropic SDK, `.env.example` | §1, §9 | Smoke test (`python llm\interface.py`) returns a validated `Recommendation` |
-| **1. Structured data ingestion** | Rebuild `scripts/refresh_stats.py` on nflreadpy (stats, snap counts, xFP, injuries, depth charts, schedules); Sleeper player-dump + projections fetchers; Parquet in `data/` via raw→staged→processed; join on `load_ff_playerids()` | §1.5, §3 | One command refreshes all Parquet artifacts for the current week |
+| **1. Structured data ingestion** *(done)* | Rebuild `scripts/refresh_stats.py` on nflreadpy (stats, snap counts, xFP, injuries, depth charts, schedules); Sleeper player-dump + projections fetchers; Parquet in `data/` via raw→staged→processed; join on `load_ff_playerids()` | §1.5, §3 | One command refreshes all Parquet artifacts for the current week |
 | **2. Context builder** | `pipeline/entity_extraction.py` (regex player/week parsing); `pipeline/context_builder.py` producing LLM-ready comparison text from Parquet | §5–§7 | `build_context(["Player A", "Player B"], week)` returns the §7 format; unit-tested with fixture data |
 | **3. Decision engine end-to-end** | `pipeline/decision_engine.py`: context builder → `run_llm()` → `Recommendation` | §8–§9 | A real two-player question answers correctly from the terminal |
 | **4. FastAPI backend** | `api/main.py` with `POST /recommendation` and `GET /players`; `.env` loaded at startup; CORS for frontend origin | §14 | `curl` returns a recommendation JSON |
