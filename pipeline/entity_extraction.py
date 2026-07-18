@@ -43,11 +43,16 @@ def extract_players(text: str, known_names: list[str] | None = None) -> list[str
     position of their first match - this naturally handles one name being a
     substring of another (e.g. "Love" inside "Loveland") because only whole-word
     boundary matches count.
+
+    Uses (?<!\\w)/(?!\\w) lookarounds instead of \\b: a plain \\b fails to match
+    right after a name ending in punctuation (e.g. "Marvin Harrison Jr.") because
+    neither the period nor the following space/end-of-string is a word character,
+    so no word boundary exists there even though it's a valid match.
     """
     names = known_names if known_names is not None else known_player_names()
     matches: list[tuple[int, str]] = []
     for name in names:
-        pattern = re.compile(rf"\b{re.escape(name)}\b", re.IGNORECASE)
+        pattern = re.compile(rf"(?<!\w){re.escape(name)}(?!\w)", re.IGNORECASE)
         found = pattern.search(text)
         if found:
             matches.append((found.start(), name))

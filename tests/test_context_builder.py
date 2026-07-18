@@ -60,6 +60,13 @@ def test_extract_players_ignores_substring_collisions():
     assert extract_players(text, known_names=known_names) == ["Colston Loveland"]
 
 
+def test_extract_players_matches_names_ending_in_punctuation():
+    """A trailing \\b fails after punctuation (e.g. "Jr."); the fix must still match it."""
+    known_names = ["Marvin Harrison Jr."]
+    text = "Start Marvin Harrison Jr. in week 5"
+    assert extract_players(text, known_names=known_names) == ["Marvin Harrison Jr."]
+
+
 def test_known_player_names_drops_null_rows(monkeypatch):
     """A row with a null player_name (e.g. an unmapped team-level row) must not crash matching."""
     fixture = pl.DataFrame({"player_name": ["Jordan Love", None, "Jared Goff"]})
