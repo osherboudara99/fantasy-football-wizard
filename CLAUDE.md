@@ -19,7 +19,7 @@ A **decision-support system** (not a chatbot) for fantasy football start/sit and
 Authoritative sequence and done-checks live in README → Development Roadmap. Current status:
 
 - **Phase 0 — Environment & LLM core: ~done** (`llm/interface.py`, `.env.example`; done-check needs a real API key)
-- **Phase 1 — Structured data ingestion: not started**
+- **Phase 1 — Structured data ingestion: done** (`scripts/refresh_stats.py`; `python scripts/refresh_stats.py` refreshes `data/{raw,staged,processed}/*.parquet` for the current week; `tests/test_refresh_stats.py` covers the aggregation/overlay logic)
 - **Phase 2 — Context builder: not started**
 - **Phase 3 — Decision engine end-to-end: not started**
 - **Phase 4 — FastAPI backend: not started**
