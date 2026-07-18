@@ -62,6 +62,9 @@ def resolve_season_week(season: int | None, week: int | None) -> tuple[int, int]
         (pl.col("game_type") == "REG") & pl.col("gameday").is_not_null()
     ).with_columns(pl.col("gameday").str.strptime(pl.Date, strict=False))
 
+    if season is not None:
+        schedules = schedules.filter(pl.col("season") == season)
+
     played = schedules.filter(pl.col("gameday") <= date.today())
     if played.height == 0:
         raise RuntimeError(

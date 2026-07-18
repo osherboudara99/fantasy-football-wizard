@@ -1,6 +1,56 @@
-import polars as pl
+from datetime import date
 
-from scripts.refresh_stats import build_processed_injuries, build_processed_player_stats
+import polars as pl
+import pytest
+
+from scripts.refresh_stats import (
+    build_processed_injuries,
+    build_processed_player_stats,
+    resolve_season_week,
+)
+
+
+def _fake_schedules():
+    """Two seasons of REG games as of "today" = 2026-07-18: 2025 fully played
+    through week 18, 2026 not yet started.
+    """
+    return pl.DataFrame({
+        "season": [2025, 2025, 2026, 2026],
+        "week": [17, 18, 1, 2],
+        "game_type": ["REG", "REG", "REG", "REG"],
+        "gameday": ["2026-01-04", "2026-01-11", "2026-09-10", "2026-09-17"],
+    })
+
+
+class _FakeDate(date):
+    """Stand-in for datetime.date with a fixed today() so tests are deterministic."""
+
+    @classmethod
+    def today(cls):
+        return date(2026, 7, 18)
+
+
+def test_resolve_season_week_returns_explicit_pair_unchanged(monkeypatch):
+    """Both season and week given: no schedule lookup needed, returned as-is."""
+    monkeypatch.setattr("scripts.refresh_stats.nfl.load_schedules", lambda **_: (_ for _ in ()).throw(
+        AssertionError("should not fetch schedules when season and week are both given")
+    ))
+    assert resolve_season_week(2025, 5) == (2025, 5)
+
+
+def test_resolve_season_week_defaults_to_latest_played_week_overall(monkeypatch):
+    """No season/week given: falls back to the latest played week across seasons."""
+    monkeypatch.setattr("scripts.refresh_stats.nfl.load_schedules", lambda **_: _fake_schedules())
+    monkeypatch.setattr("scripts.refresh_stats.date", _FakeDate)
+    assert resolve_season_week(None, None) == (2025, 18)
+
+
+def test_resolve_season_week_requires_played_games_within_requested_season(monkeypatch):
+    """--season 2026 alone must not borrow 2025's latest week; 2026 has no played games yet."""
+    monkeypatch.setattr("scripts.refresh_stats.nfl.load_schedules", lambda **_: _fake_schedules())
+    monkeypatch.setattr("scripts.refresh_stats.date", _FakeDate)
+    with pytest.raises(RuntimeError):
+        resolve_season_week(2026, None)
 
 
 def test_build_processed_player_stats_aggregates_last3_and_season():
