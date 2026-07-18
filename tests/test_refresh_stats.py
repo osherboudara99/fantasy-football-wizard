@@ -38,8 +38,8 @@ def test_resolve_season_week_returns_explicit_pair_unchanged(monkeypatch):
     assert resolve_season_week(2025, 5) == (2025, 5)
 
 
-def test_resolve_season_week_defaults_to_latest_played_week_overall(monkeypatch):
-    """No season/week given: falls back to the latest played week across seasons."""
+def test_resolve_season_week_defaults_to_latest_completed_week_overall(monkeypatch):
+    """No season/week given: falls back to the latest fully completed week across seasons."""
     monkeypatch.setattr("scripts.refresh_stats.nfl.load_schedules", lambda **_: _fake_schedules())
     monkeypatch.setattr("scripts.refresh_stats.date", _FakeDate)
     assert resolve_season_week(None, None) == (2025, 18)
@@ -48,6 +48,24 @@ def test_resolve_season_week_defaults_to_latest_played_week_overall(monkeypatch)
 def test_resolve_season_week_requires_played_games_within_requested_season(monkeypatch):
     """--season 2026 alone must not borrow 2025's latest week; 2026 has no played games yet."""
     monkeypatch.setattr("scripts.refresh_stats.nfl.load_schedules", lambda **_: _fake_schedules())
+    monkeypatch.setattr("scripts.refresh_stats.date", _FakeDate)
+    with pytest.raises(RuntimeError):
+        resolve_season_week(2026, None)
+
+
+def _partial_week_schedule():
+    """2026 week 1 has played its Thursday game as of "today" but not yet its Sunday game."""
+    return pl.DataFrame({
+        "season": [2026, 2026],
+        "week": [1, 1],
+        "game_type": ["REG", "REG"],
+        "gameday": ["2026-07-16", "2026-07-20"],
+    })
+
+
+def test_resolve_season_week_skips_a_week_still_in_progress(monkeypatch):
+    """A week with a game that hasn't happened yet must not be picked as complete."""
+    monkeypatch.setattr("scripts.refresh_stats.nfl.load_schedules", lambda **_: _partial_week_schedule())
     monkeypatch.setattr("scripts.refresh_stats.date", _FakeDate)
     with pytest.raises(RuntimeError):
         resolve_season_week(2026, None)

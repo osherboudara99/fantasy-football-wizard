@@ -65,14 +65,20 @@ def resolve_season_week(season: int | None, week: int | None) -> tuple[int, int]
     if season is not None:
         schedules = schedules.filter(pl.col("season") == season)
 
-    played = schedules.filter(pl.col("gameday") <= date.today())
-    if played.height == 0:
+    # A week only counts once every game in it has been played - using the single
+    # most recently played game would return a week still in progress (e.g. right
+    # after Thursday Night Football but before that week's Sunday/Monday games).
+    week_ends = schedules.group_by(["season", "week"]).agg(
+        pl.col("gameday").max().alias("week_end")
+    )
+    completed = week_ends.filter(pl.col("week_end") <= date.today())
+    if completed.height == 0:
         raise RuntimeError(
-            "No played regular-season games found; pass --season/--week explicitly"
+            "No completed regular-season week found; pass --season/--week explicitly"
         )
     # During the off-season this falls back to the last week of the prior season,
     # which is what "current" should mean until the next season's games start.
-    latest = played.sort("gameday", descending=True).row(0, named=True)
+    latest = completed.sort("week_end", descending=True).row(0, named=True)
     return season or latest["season"], week or latest["week"]
 
 
