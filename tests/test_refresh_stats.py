@@ -22,6 +22,16 @@ def _fake_schedules():
     })
 
 
+def _partial_week_schedule():
+    """2026 week 1 has played its Thursday game as of "today" but not yet its Sunday game."""
+    return pl.DataFrame({
+        "season": [2026, 2026],
+        "week": [1, 1],
+        "game_type": ["REG", "REG"],
+        "gameday": ["2026-07-16", "2026-07-20"],
+    })
+
+
 class _FakeDate(date):
     """Stand-in for datetime.date with a fixed today() so tests are deterministic."""
 
@@ -51,16 +61,6 @@ def test_resolve_season_week_requires_played_games_within_requested_season(monke
     monkeypatch.setattr("scripts.refresh_stats.date", _FakeDate)
     with pytest.raises(RuntimeError):
         resolve_season_week(2026, None)
-
-
-def _partial_week_schedule():
-    """2026 week 1 has played its Thursday game as of "today" but not yet its Sunday game."""
-    return pl.DataFrame({
-        "season": [2026, 2026],
-        "week": [1, 1],
-        "game_type": ["REG", "REG"],
-        "gameday": ["2026-07-16", "2026-07-20"],
-    })
 
 
 def test_resolve_season_week_skips_a_week_still_in_progress(monkeypatch):

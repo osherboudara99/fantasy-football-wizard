@@ -31,6 +31,19 @@ SLEEPER_PLAYER_FIELDS = [
 
 LAST_N_WEEKS = 3
 
+# nflreadpy.load_ff_rankings(type="week") always returns the latest FantasyPros
+# scrape - there's no way to request a historical week's ECR. Used to build an
+# empty-but-correctly-typed stand-in when the requested week isn't the current one.
+FF_RANKINGS_ECR_SCHEMA = {
+    "fantasypros_id": pl.Int64,
+    "player_name": pl.String,
+    "pos": pl.String,
+    "team": pl.String,
+    "ecr": pl.Float64,
+    "pos_rank": pl.String,
+    "player_bye_week": pl.Int64,
+}
+
 
 def log(msg: str) -> None:
     """Print a progress message prefixed with the script name."""
@@ -123,9 +136,19 @@ def fetch_sleeper_projections(season: int, week: int) -> pl.DataFrame:
     return pl.DataFrame(rows, infer_schema_length=None)
 
 
-def fetch_raw(season: int, week: int) -> dict[str, pl.DataFrame]:
-    """Fetch every nflreadpy + Sleeper source for the given season/week and write raw/*.parquet."""
+def fetch_raw(season: int, week: int, fetch_ecr: bool) -> dict[str, pl.DataFrame]:
+    """Fetch every nflreadpy + Sleeper source for the given season/week and write raw/*.parquet.
+
+    `fetch_ecr` should be False for any season/week that isn't the current one -
+    load_ff_rankings only ever returns the latest scrape, so joining it against a
+    backfilled/historical week would silently pair mismatched data.
+    """
     log(f"fetching raw sources for season={season} week={week}")
+    if fetch_ecr:
+        ff_rankings = nfl.load_ff_rankings(type="week")
+    else:
+        log(f"skipping FantasyPros ECR: season={season} week={week} is not the current week")
+        ff_rankings = pl.DataFrame(schema=FF_RANKINGS_ECR_SCHEMA)
     raw = {
         "player_stats": nfl.load_player_stats(seasons=season, summary_level="week"),
         "snap_counts": nfl.load_snap_counts(seasons=season),
@@ -137,7 +160,7 @@ def fetch_raw(season: int, week: int) -> dict[str, pl.DataFrame]:
         "depth_charts": nfl.load_depth_charts(seasons=season),
         "schedules": nfl.load_schedules(seasons=season),
         "ff_playerids": nfl.load_ff_playerids(),
-        "ff_rankings": nfl.load_ff_rankings(type="week"),
+        "ff_rankings": ff_rankings,
         "sleeper_players": fetch_sleeper_players(),
         "sleeper_projections": fetch_sleeper_projections(season, week),
     }
@@ -397,7 +420,13 @@ def main() -> None:
     season, week = resolve_season_week(args.season, args.week)
     log(f"resolved season={season} week={week}")
 
-    raw = fetch_raw(season, week)
+    # ECR rankings are only ever available for the current week (see fetch_raw) -
+    # if the caller explicitly requested a different season/week, skip them.
+    is_current_week = args.season is None and args.week is None
+    if not is_current_week:
+        is_current_week = (season, week) == resolve_season_week(None, None)
+
+    raw = fetch_raw(season, week, is_current_week)
     staged = build_staged(raw, season, week)
     build_processed(staged, season, week)
     log("refresh complete")
