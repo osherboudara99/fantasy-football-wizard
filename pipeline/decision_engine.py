@@ -75,6 +75,33 @@ def resolve_players(question: str, players: list[str] | None) -> list[str]:
     return resolved
 
 
+def resolve_week(question: str, week: int | None) -> int:
+    """Explicit week, else the week named in the question, else the data's week.
+
+    `or` would be wrong here: week 0 is falsy, so a question asking about "week 0"
+    would silently be answered for a different week instead of failing loudly in
+    build_context.
+    """
+    if week is not None:
+        return week
+    from_question = extract_week(question)
+    return from_question if from_question is not None else latest_week()
+
+
+def _check_recommendation(recommendation: Recommendation, players: list[str]) -> None:
+    """Deterministic guard on the LLM's answer.
+
+    Structured outputs guarantee the response's *shape*, not that it named the two
+    players actually asked about - a hallucinated or repeated name would otherwise
+    render as a confident recommendation.
+    """
+    answered = {recommendation.start.strip().casefold(), recommendation.bench.strip().casefold()}
+    if answered != {name.strip().casefold() for name in players}:
+        raise DecisionError(
+            f"LLM answered about {sorted(answered)}, not the requested {sorted(players)}"
+        )
+
+
 def decide(
     question: str,
     players: list[str] | None = None,
@@ -87,9 +114,10 @@ def decide(
     inject fixture DataFrames instead of reading data/processed/.
     """
     resolved_players = resolve_players(question, players)
-    resolved_week = week if week is not None else extract_week(question) or latest_week()
+    resolved_week = resolve_week(question, week)
     context = build_context(resolved_players, resolved_week, tables=tables)
     recommendation = run_llm(context, question)
+    _check_recommendation(recommendation, resolved_players)
     return Decision(
         question=question,
         players=resolved_players,
