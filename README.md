@@ -29,9 +29,9 @@ Ordered execution plan. Each phase references the detailed sections below; a pha
 | Phase | Scope | Refs | Done when |
 |-------|-------|------|-----------|
 | **0. Environment & LLM core** *(~done)* | uv env, deps, `llm/interface.py` on the Anthropic SDK, `.env.example` | §1, §9 | Smoke test (`python llm\interface.py`) returns a validated `Recommendation` |
-| **1. Structured data ingestion** *(done)* | Rebuild `scripts/refresh_stats.py` on nflreadpy (stats, snap counts, xFP, injuries, depth charts, schedules); Sleeper player-dump + projections fetchers; Parquet in `data/` via raw→staged→processed; join on `load_ff_playerids()` | §1.5, §3 | One command refreshes all Parquet artifacts for the current week |
-| **2. Context builder** | `pipeline/entity_extraction.py` (regex player/week parsing); `pipeline/context_builder.py` producing LLM-ready comparison text from Parquet | §5–§7 | `build_context(["Player A", "Player B"], week)` returns the §7 format; unit-tested with fixture data |
-| **3. Decision engine end-to-end** | `pipeline/decision_engine.py`: context builder → `run_llm()` → `Recommendation` | §8–§9 | A real two-player question answers correctly from the terminal |
+| **1. Structured data ingestion** *(done)* | Rebuild `scripts/refresh_stats.py` on nflreadpy (stats, snap counts, xFP, injuries, depth charts, schedules); Sleeper player-dump + projections fetchers; Parquet in `data/` via raw→staged→processed; join on `load_ff_playerids()` | §1.5, §3 | One command refreshes all Parquet artifacts for the upcoming week |
+| **2. Context builder** *(done)* | `pipeline/entity_extraction.py` (regex player/week parsing); `pipeline/context_builder.py` producing LLM-ready comparison text from Parquet | §5–§7 | `build_context(["Player A", "Player B"], week)` returns the §7 format; unit-tested with fixture data |
+| **3. Decision engine end-to-end** *(done)* | `pipeline/decision_engine.py`: context builder → `run_llm()` → `Recommendation` | §8–§9 | A real two-player question answers correctly from the terminal |
 | **4. FastAPI backend** | `api/main.py` with `POST /recommendation` and `GET /players`; `.env` loaded at startup; CORS for frontend origin | §14 | `curl` returns a recommendation JSON |
 | **5. React frontend** | `frontend/` Vite app: player pickers, question input, recommendation + confidence display | §10 | Full flow works locally against FastAPI |
 | **6. News RAG** | `scripts/refresh_news.py` (RSS feeds); `embeddings/build_embeddings.py` (sentence-transformers → Chroma, player-ID + date metadata); `retrieval/news_retriever.py` (top-k, ≤7-day filter); wire into context builder | §4, §6.2 | Recommendations cite recent news |
@@ -485,6 +485,8 @@ UI for interacting with the fantasy assistant.
 ---
 
 ## 11. Data Refresh Strategy
+
+**Which week gets refreshed**: `refresh_stats.py` targets the **upcoming** week — the earliest regular-season week that still has an unplayed game (mid-week that's the week in progress; in the off-season it's week 1 of the next season). Stats aggregate over the weeks *before* the target, while projections and injury reports are fetched *for* it, so a recommendation is never built from the box score of the game it's projecting. Early in a season the recent-form window reaches back into the prior season, and nflverse tables that a new season hasn't published yet are skipped rather than failing the refresh.
 
 | Data Type | Source | Refresh Frequency |
 |---------|--------|------------------|

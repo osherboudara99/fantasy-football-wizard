@@ -18,7 +18,7 @@ SYSTEM_PROMPT = (
 class Recommendation(BaseModel):
     start: str = Field(description="The player to start")
     bench: str = Field(description="The player to bench")
-    confidence: float = Field(description="Confidence between 0 and 1")
+    confidence: float = Field(ge=0, le=1, description="Confidence between 0 and 1")
     key_factors: list[str] = Field(description="Main reasons for the recommendation")
     risk_factors: list[str] = Field(description="Risks that could invalidate it")
 

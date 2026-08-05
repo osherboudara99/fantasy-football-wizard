@@ -6,7 +6,9 @@ import pytest
 from scripts.refresh_stats import (
     build_processed_injuries,
     build_processed_player_stats,
-    resolve_season_week,
+    build_staged_injuries,
+    resolve_target_week,
+    stats_seasons,
 )
 
 
@@ -40,62 +42,147 @@ class _FakeDate(date):
         return date(2026, 7, 18)
 
 
-def test_resolve_season_week_returns_explicit_pair_unchanged(monkeypatch):
+def test_resolve_target_week_returns_explicit_pair_unchanged(monkeypatch):
     """Both season and week given: no schedule lookup needed, returned as-is."""
     monkeypatch.setattr("scripts.refresh_stats.nfl.load_schedules", lambda **_: (_ for _ in ()).throw(
         AssertionError("should not fetch schedules when season and week are both given")
     ))
-    assert resolve_season_week(2025, 5) == (2025, 5)
+    assert resolve_target_week(2025, 5) == (2025, 5)
 
 
-def test_resolve_season_week_defaults_to_latest_completed_week_overall(monkeypatch):
-    """No season/week given: falls back to the latest fully completed week across seasons."""
+def test_resolve_target_week_defaults_to_the_next_unplayed_week(monkeypatch):
+    """2025 is finished as of "today", so the decision to make is about 2026 week 1."""
     monkeypatch.setattr("scripts.refresh_stats.nfl.load_schedules", lambda **_: _fake_schedules())
     monkeypatch.setattr("scripts.refresh_stats.date", _FakeDate)
-    assert resolve_season_week(None, None) == (2025, 18)
+    assert resolve_target_week(None, None) == (2026, 1)
 
 
-def test_resolve_season_week_requires_played_games_within_requested_season(monkeypatch):
-    """--season 2026 alone must not borrow 2025's latest week; 2026 has no played games yet."""
-    monkeypatch.setattr("scripts.refresh_stats.nfl.load_schedules", lambda **_: _fake_schedules())
-    monkeypatch.setattr("scripts.refresh_stats.date", _FakeDate)
-    with pytest.raises(RuntimeError):
-        resolve_season_week(2026, None)
-
-
-def test_resolve_season_week_skips_a_week_still_in_progress(monkeypatch):
-    """A week with a game that hasn't happened yet must not be picked as complete."""
+def test_resolve_target_week_stays_on_a_week_still_in_progress(monkeypatch):
+    """Mid-week (Thursday played, Sunday not) the target is still that same week."""
     monkeypatch.setattr("scripts.refresh_stats.nfl.load_schedules", lambda **_: _partial_week_schedule())
     monkeypatch.setattr("scripts.refresh_stats.date", _FakeDate)
+    assert resolve_target_week(None, None) == (2026, 1)
+
+
+def test_resolve_target_week_raises_when_the_requested_season_is_over(monkeypatch):
+    """--season 2025 alone has no unplayed weeks left; that's an error, not 2026's week 1."""
+    monkeypatch.setattr("scripts.refresh_stats.nfl.load_schedules", lambda **_: _fake_schedules())
+    monkeypatch.setattr("scripts.refresh_stats.date", _FakeDate)
     with pytest.raises(RuntimeError):
-        resolve_season_week(2026, None)
+        resolve_target_week(2025, None)
 
 
-def test_build_processed_player_stats_aggregates_last3_and_season():
-    """A 4-week staged history should yield a last-3-week avg, season avg, and last-week snapshot."""
-    staged = pl.DataFrame({
-        "player_id": ["00-1", "00-1", "00-1", "00-1"],
-        "player_name": ["Test Player"] * 4,
-        "position": ["WR"] * 4,
-        "team": ["MIN"] * 4,
-        "season": [2025] * 4,
-        "week": [15, 16, 17, 18],
-        "fantasy_points": [5.0, 10.0, 15.0, 20.0],
-        "fantasy_points_ppr": [8.0, 13.0, 18.0, 23.0],
-        "snap_percentage": [0.5, 0.6, 0.7, 0.8],
-        "targets": [4, 5, 6, 7],
-        "carries": [0, 0, 0, 0],
-        "xfp": [6.0, 11.0, 16.0, 21.0],
+def test_stats_seasons_reaches_back_only_early_in_the_season():
+    assert stats_seasons(2026, 1) == [2025, 2026]
+    assert stats_seasons(2026, 3) == [2025, 2026]
+    assert stats_seasons(2026, 4) == [2026]
+
+
+def _weekly_staged(seasons, weeks, points, season_types=None):
+    n = len(weeks)
+    return pl.DataFrame({
+        "player_id": ["00-1"] * n,
+        "player_name": ["Test Player"] * n,
+        "position": ["WR"] * n,
+        "team": ["MIN"] * n,
+        "season": seasons,
+        "week": weeks,
+        "season_type": season_types or ["REG"] * n,
+        "fantasy_points": points,
+        "fantasy_points_ppr": [p + 3.0 for p in points],
+        "snap_percentage": [0.7] * n,
+        "targets": [5] * n,
+        "carries": [0] * n,
+        "xfp": [10.0] * n,
     })
+
+
+def test_build_processed_player_stats_excludes_the_target_week():
+    """Week 18 is the decision, so form covers 15-17 - not the game being projected."""
+    staged = _weekly_staged(
+        seasons=[2025] * 4, weeks=[15, 16, 17, 18],
+        points=[5.0, 10.0, 15.0, 20.0],
+    )
 
     result = build_processed_player_stats(staged, season=2025, week=18)
     row = result.row(0, named=True)
 
-    # last 3 weeks = 16, 17, 18 (week > 18 - 3)
-    assert row["avg_fantasy_points_last3"] == 15.0
-    # season to date = all 4 weeks
-    assert row["avg_fantasy_points_season"] == 12.5
-    assert row["fantasy_points_last_week"] == 20.0
+    # last 3 completed weeks = 15, 16, 17
+    assert row["avg_fantasy_points_last3"] == 10.0
+    # season to date = weeks 15-17, week 18 hasn't happened
+    assert row["avg_fantasy_points_season"] == 10.0
+    assert row["fantasy_points_last_week"] == 15.0
+
+
+def test_build_processed_player_stats_carries_form_over_into_a_new_season():
+    """Week 1 has no completed weeks of its own - recent form comes from last season."""
+    staged = _weekly_staged(
+        seasons=[2025, 2025, 2025, 2026], weeks=[16, 17, 18, 1],
+        points=[6.0, 12.0, 18.0, 99.0],
+    )
+
+    result = build_processed_player_stats(staged, season=2026, week=1)
+    row = result.row(0, named=True)
+
+    assert row["avg_fantasy_points_last3"] == 12.0
+    assert row["fantasy_points_last_week"] == 18.0
+    # season-to-date is the *target* season, which hasn't started
+    assert row["avg_fantasy_points_season"] is None
+    assert row["season"] == 2026 and row["week"] == 1
+
+
+def test_build_processed_player_stats_ignores_postseason_weeks():
+    """POST week 19 outranks REG week 18 numerically - it must not count as recent form."""
+    staged = _weekly_staged(
+        seasons=[2025] * 3, weeks=[17, 18, 19],
+        points=[10.0, 10.0, 40.0],
+        season_types=["REG", "REG", "POST"],
+    )
+
+    result = build_processed_player_stats(staged, season=2026, week=1)
+    row = result.row(0, named=True)
+
+    assert row["avg_fantasy_points_last3"] == 10.0
+    assert row["fantasy_points_last_week"] == 10.0
+
+
+def test_build_staged_injuries_matches_whitespace_padded_sleeper_ids():
+    """Sleeper pads ~20% of its gsis_ids; unstripped they split one player into two
+    rows - an official "Out" report plus a Sleeper row that later defaults to Healthy.
+    """
+    raw = {
+        "injuries": pl.DataFrame({
+            "gsis_id": ["00-1"],
+            "season": [2025],
+            "week": [18],
+            "team": ["MIN"],
+            "position": ["TE"],
+            "full_name": ["Padded Id Player"],
+            "report_primary_injury": ["Shoulder"],
+            "report_status": ["Out"],
+            "practice_status": ["Did Not Participate In Practice"],
+            "date_modified": ["2026-01-09"],
+        }),
+        "sleeper_players": pl.DataFrame({
+            "gsis_id": [" 00-1"],
+            "full_name": ["Padded Id Player"],
+            "position": ["TE"],
+            "team": ["MIN"],
+            "injury_status": [None],
+            "injury_body_part": [None],
+            "injury_notes": [None],
+            "injury_start_date": [None],
+            "practice_participation": [None],
+        }),
+    }
+
+    staged = build_staged_injuries(raw, season=2025, week=18)
+
+    assert staged.height == 1
+    row = staged.row(0, named=True)
+    assert row["player_id"] == "00-1"
+    assert row["report_status"] == "Out"
+    assert build_processed_injuries(staged).row(0, named=True)["status"] == "Out"
 
 
 def test_build_processed_injuries_overlays_sleeper_and_defaults_healthy():

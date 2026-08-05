@@ -28,12 +28,29 @@ def _load_processed() -> dict[str, pl.DataFrame]:
     }
 
 
-def _format_injury(injuries: pl.DataFrame, player_name: str) -> str:
+def _match_player(df: pl.DataFrame, name: str, player_id: str | None) -> pl.DataFrame:
+    """Rows for one player, keyed on player_id when both sides carry it.
+
+    Names are not a join key: player_stats uses nflverse display names ("Kenneth
+    Walker III") while projections come from Sleeper ("Kenneth Walker"), so
+    name-matching silently drops every suffixed player. player_id (gsis_id) is on
+    all three processed tables - fall back to the name only for fixture frames
+    that don't carry it.
+    """
+    if player_id is not None and "player_id" in df.columns:
+        return df.filter(pl.col("player_id") == player_id)
+    return df.filter(pl.col("player_name") == name)
+
+
+def _format_injury(injuries: pl.DataFrame, name: str, player_id: str | None) -> str:
     """"Questionable -> Full practice Friday" style line, or "Healthy" if no report."""
-    row = injuries.filter(pl.col("player_name") == player_name)
-    if row.height == 0:
+    rows = _match_player(injuries, name, player_id)
+    if rows.height == 0:
         return "Healthy"
-    record = row.row(0, named=True)
+    # A real report always outranks the "Healthy" default when a player somehow
+    # lands more than one row - never downgrade an injury by row ordering.
+    reported = rows.filter(pl.col("status") != "Healthy")
+    record = (reported if reported.height else rows).row(0, named=True)
     status, practice = record["status"], record["practice_level"]
     return f"{status} -> {practice}" if practice else status
 
@@ -45,17 +62,17 @@ def _format_player(name: str, week: int, tables: dict[str, pl.DataFrame]) -> str
     )
     if stats.height == 0:
         raise PlayerNotFoundError(f'No stats found for "{name}" in week {week}')
-    avg_last3 = stats.row(0, named=True)["avg_fantasy_points_last3"]
+    stats_row = stats.row(0, named=True)
+    avg_last3 = stats_row["avg_fantasy_points_last3"]
+    player_id = stats_row.get("player_id")
 
-    proj = tables["projections"].filter(
-        (pl.col("player_name") == name) & (pl.col("week") == week)
-    )
+    proj = _match_player(tables["projections"], name, player_id).filter(pl.col("week") == week)
     projected = proj.row(0, named=True)["projected_points"] if proj.height else None
 
     lines = [f"{name}:", f"- Avg fantasy points (last 3 weeks): {avg_last3:.1f}"]
     if projected is not None:
         lines.append(f"- Projected points: {projected:.1f}")
-    lines.append(f"- Injury: {_format_injury(tables['injuries'], name)}")
+    lines.append(f"- Injury: {_format_injury(tables['injuries'], name, player_id)}")
     return "\n".join(lines)
 
 
