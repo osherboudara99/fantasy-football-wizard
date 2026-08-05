@@ -1,5 +1,6 @@
 import polars as pl
 import pytest
+from pydantic import ValidationError
 
 from llm.interface import Recommendation
 from pipeline.decision_engine import (
@@ -105,6 +106,47 @@ def test_explicit_week_overrides_the_question_text(monkeypatch, stub_llm):
         tables=tables,
     )
     assert decision.week == 9
+
+
+def test_week_zero_in_the_question_is_not_swallowed_by_the_fallback(monkeypatch, stub_llm):
+    """Week 0 is falsy - it must still be the resolved week, not silently replaced."""
+    monkeypatch.setattr("pipeline.decision_engine.latest_week", lambda: 18)
+    tables = _fixture_tables()
+    tables["player_stats"] = tables["player_stats"].with_columns(pl.lit(0).alias("week"))
+    tables["projections"] = tables["projections"].with_columns(pl.lit(0).alias("week"))
+
+    decision = decide(
+        "Jordan Love or Jared Goff in week 0?",
+        players=["Jordan Love", "Jared Goff"],
+        tables=tables,
+    )
+    assert decision.week == 0
+
+
+def test_decide_rejects_a_recommendation_about_other_players(monkeypatch):
+    """A hallucinated name must fail loudly instead of rendering as a real answer."""
+    monkeypatch.setattr(
+        "pipeline.decision_engine.run_llm",
+        lambda *_, **__: Recommendation(
+            start="Somebody Else", bench="Jared Goff", confidence=0.9,
+            key_factors=[], risk_factors=[],
+        ),
+    )
+    with pytest.raises(DecisionError):
+        decide(
+            "Jordan Love or Jared Goff in week 5?",
+            players=["Jordan Love", "Jared Goff"],
+            tables=_fixture_tables(),
+        )
+
+
+def test_recommendation_rejects_out_of_range_confidence():
+    """Structured outputs guarantee shape; the schema has to guarantee the range."""
+    with pytest.raises(ValidationError):
+        Recommendation(
+            start="Jordan Love", bench="Jared Goff", confidence=1.87,
+            key_factors=[], risk_factors=[],
+        )
 
 
 @pytest.mark.parametrize("found", [[], ["Jordan Love"], ["Jordan Love", "Jared Goff", "Bo Nix"]])
