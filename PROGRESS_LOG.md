@@ -52,10 +52,36 @@ Append-only, one entry per completed phase.
   4. Nothing checked the LLM's answer against the question — a hallucinated name
      or 187% confidence rendered fine. Added `_check_recommendation()` plus
      `ge=0, le=1` on `Recommendation.confidence`.
-- Known limitation (not fixed, flagged to the user): `latest_week()` returns the
-  most recently *completed* week, because that's what `refresh_stats.py` resolves
-  and fetches projections for. In-season this answers about a game already
-  played; asking for the upcoming week raises `PlayerNotFoundError`. Fixing it
-  means changing Phase 1's week resolution — a scope decision, not a Phase 3 bug.
 - Approx LLM $ spent this phase: ~$0.02 (3 real `claude-haiku-4-5` calls: 2 by
   the builder, 1 by the checker).
+
+## 2026-08-05 — Follow-up: week resolution now targets the upcoming week
+
+Raised by the Phase 3 checker as a known limitation, then fixed on user request
+(same branch, before opening the PR).
+
+- Problem: `refresh_stats.resolve_season_week()` resolved the most recently
+  *completed* week, so the whole pipeline described a game already played —
+  recent-form averages included the very week being "projected", and asking about
+  the upcoming week raised `PlayerNotFoundError`. Backwards for a start/sit tool.
+- Fix: `resolve_target_week()` picks the earliest regular-season week with an
+  unplayed game (mid-week that's the week in progress; in the off-season it's week
+  1 of the next season). `build_processed_player_stats()` now aggregates over weeks
+  strictly *before* the target, chronologically rather than numerically, so an
+  early-season target carries recent form over from the prior season;
+  `season_type == "REG"` is filtered explicitly so POST weeks 19+ can't sort ahead
+  of a new season's week 1. `stats_seasons()` pulls the prior season only when the
+  window actually reaches back. `decision_engine.latest_week()` → `target_week()`.
+- Also needed: nflverse publishes nothing for a season until it starts, so
+  targeting the upcoming week 404s (or trips nflreadpy's season-range guard) on
+  every per-season table. `load_by_season()` loads season by season and skips the
+  unpublished ones; the official injury report falls back to an empty, correctly
+  typed table (Sleeper's live dump still carries `injury_status`), and schedules
+  load via `seasons=True` + filter since they're published before a season starts.
+- Verified with a real refresh on 2026-08-05: target resolved to 2026 week 1,
+  form carried from 2025 weeks 16-18, 946 non-null Sleeper projections for the
+  upcoming week, injuries from Sleeper (81 Questionable, 18 PUP, 2 IR). End-to-end
+  CLI run with no `--week`: "Bijan Robinson or Jahmyr Gibbs?" → Week 1 comparison,
+  START Bijan at 72%.
+- Tests: `python -m pytest -q` → 33 passed. Lint: `ruff check .` → clean.
+- Approx LLM $ spent: ~$0.01 (1 real `claude-haiku-4-5` call).
