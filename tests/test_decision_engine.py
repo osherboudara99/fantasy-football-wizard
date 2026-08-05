@@ -1,4 +1,4 @@
-import polars as pl
+﻿import polars as pl
 import pytest
 from pydantic import ValidationError
 
@@ -8,8 +8,8 @@ from pipeline.decision_engine import (
     DecisionError,
     decide,
     format_decision,
-    latest_week,
     resolve_players,
+    target_week,
 )
 
 
@@ -82,9 +82,9 @@ def test_decide_extracts_players_and_week_from_the_question(monkeypatch, stub_ll
     assert decision.week == 5
 
 
-def test_decide_falls_back_to_latest_week_when_question_has_none(monkeypatch, stub_llm):
+def test_decide_falls_back_to_target_week_when_question_has_none(monkeypatch, stub_llm):
     """A question without "week N" uses whatever week the processed data holds."""
-    monkeypatch.setattr("pipeline.decision_engine.latest_week", lambda: 5)
+    monkeypatch.setattr("pipeline.decision_engine.target_week", lambda: 5)
     decision = decide(
         "Jordan Love or Jared Goff?",
         players=["Jordan Love", "Jared Goff"],
@@ -110,7 +110,7 @@ def test_explicit_week_overrides_the_question_text(monkeypatch, stub_llm):
 
 def test_week_zero_in_the_question_is_not_swallowed_by_the_fallback(monkeypatch, stub_llm):
     """Week 0 is falsy - it must still be the resolved week, not silently replaced."""
-    monkeypatch.setattr("pipeline.decision_engine.latest_week", lambda: 18)
+    monkeypatch.setattr("pipeline.decision_engine.target_week", lambda: 18)
     tables = _fixture_tables()
     tables["player_stats"] = tables["player_stats"].with_columns(pl.lit(0).alias("week"))
     tables["projections"] = tables["projections"].with_columns(pl.lit(0).alias("week"))
@@ -156,17 +156,17 @@ def test_resolve_players_requires_exactly_two(found):
         resolve_players("some question", found)
 
 
-def test_latest_week_reads_the_max_week_in_processed_stats(monkeypatch):
+def test_target_week_reads_the_max_week_in_processed_stats(monkeypatch):
     fixture = pl.DataFrame({"week": [16, 18, 17]})
     monkeypatch.setattr("pipeline.decision_engine.pl.read_parquet", lambda *_, **__: fixture)
-    assert latest_week() == 18
+    assert target_week() == 18
 
 
-def test_latest_week_raises_on_empty_processed_stats(monkeypatch):
+def test_target_week_raises_on_empty_processed_stats(monkeypatch):
     empty = pl.DataFrame({"week": []}, schema={"week": pl.Int32})
     monkeypatch.setattr("pipeline.decision_engine.pl.read_parquet", lambda *_, **__: empty)
     with pytest.raises(DecisionError):
-        latest_week()
+        target_week()
 
 
 def test_format_decision_renders_the_recommendation_fields():
