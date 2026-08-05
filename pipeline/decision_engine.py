@@ -50,11 +50,11 @@ def log(msg: str) -> None:
     print(f"[decision_engine] {msg}")
 
 
-def latest_week() -> int:
-    """The week the processed data currently holds - the default when none is asked for.
+def target_week() -> int:
+    """The week the processed data describes - the default when none is asked for.
 
-    `refresh_stats.py` writes one week at a time, so the max here is the week the
-    processed tables describe; asking for anything else would find no rows.
+    `refresh_stats.py` writes one week at a time and targets the upcoming week, so
+    this is the week being decided about; asking for anything else finds no rows.
     """
     weeks = pl.read_parquet(PROCESSED_DIR / "player_stats.parquet", columns=["week"])
     if weeks.height == 0:
@@ -85,7 +85,7 @@ def resolve_week(question: str, week: int | None) -> int:
     if week is not None:
         return week
     from_question = extract_week(question)
-    return from_question if from_question is not None else latest_week()
+    return from_question if from_question is not None else target_week()
 
 
 def _check_recommendation(recommendation: Recommendation, players: list[str]) -> None:
