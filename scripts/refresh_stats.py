@@ -255,7 +255,12 @@ def build_staged_injuries(raw: dict[str, pl.DataFrame], season: int, week: int) 
         raw["sleeper_players"]
         .filter(pl.col("gsis_id").is_not_null())
         .select([
-            "gsis_id", "full_name", "position", "team", "injury_status",
+            # Sleeper ships ~20% of its gsis_ids whitespace-padded (" 00-0035229").
+            # Left unstripped they never match the official report's clean ids, so
+            # the full join below emits two rows per player - one real report and
+            # one Sleeper-only row that defaults to "Healthy" downstream.
+            pl.col("gsis_id").str.strip_chars(),
+            "full_name", "position", "team", "injury_status",
             "injury_body_part", "injury_notes", "injury_start_date",
             "practice_participation",
         ])

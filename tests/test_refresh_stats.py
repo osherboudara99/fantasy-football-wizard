@@ -6,6 +6,7 @@ import pytest
 from scripts.refresh_stats import (
     build_processed_injuries,
     build_processed_player_stats,
+    build_staged_injuries,
     resolve_season_week,
 )
 
@@ -96,6 +97,45 @@ def test_build_processed_player_stats_aggregates_last3_and_season():
     # season to date = all 4 weeks
     assert row["avg_fantasy_points_season"] == 12.5
     assert row["fantasy_points_last_week"] == 20.0
+
+
+def test_build_staged_injuries_matches_whitespace_padded_sleeper_ids():
+    """Sleeper pads ~20% of its gsis_ids; unstripped they split one player into two
+    rows - an official "Out" report plus a Sleeper row that later defaults to Healthy.
+    """
+    raw = {
+        "injuries": pl.DataFrame({
+            "gsis_id": ["00-1"],
+            "season": [2025],
+            "week": [18],
+            "team": ["MIN"],
+            "position": ["TE"],
+            "full_name": ["Padded Id Player"],
+            "report_primary_injury": ["Shoulder"],
+            "report_status": ["Out"],
+            "practice_status": ["Did Not Participate In Practice"],
+            "date_modified": ["2026-01-09"],
+        }),
+        "sleeper_players": pl.DataFrame({
+            "gsis_id": [" 00-1"],
+            "full_name": ["Padded Id Player"],
+            "position": ["TE"],
+            "team": ["MIN"],
+            "injury_status": [None],
+            "injury_body_part": [None],
+            "injury_notes": [None],
+            "injury_start_date": [None],
+            "practice_participation": [None],
+        }),
+    }
+
+    staged = build_staged_injuries(raw, season=2025, week=18)
+
+    assert staged.height == 1
+    row = staged.row(0, named=True)
+    assert row["player_id"] == "00-1"
+    assert row["report_status"] == "Out"
+    assert build_processed_injuries(staged).row(0, named=True)["status"] == "Out"
 
 
 def test_build_processed_injuries_overlays_sleeper_and_defaults_healthy():
