@@ -21,7 +21,7 @@ Authoritative sequence and done-checks live in README → Development Roadmap. C
 - **Phase 0 — Environment & LLM core: ~done** (`llm/interface.py`, `.env.example`; done-check needs a real API key)
 - **Phase 1 — Structured data ingestion: done** (`scripts/refresh_stats.py`; `python scripts/refresh_stats.py` refreshes `data/{raw,staged,processed}/*.parquet` for the current week; `tests/test_refresh_stats.py` covers the aggregation/overlay logic)
 - **Phase 2 — Context builder: done** (`pipeline/entity_extraction.py`, `pipeline/context_builder.py`; `build_context(players, week)` returns the §7 format minus the "Recent news" bullet, deferred to Phase 6; `tests/test_context_builder.py` covers extraction + assembly)
-- **Phase 3 — Decision engine end-to-end: not started**
+- **Phase 3 — Decision engine end-to-end: done** (`pipeline/decision_engine.py`; `decide(question, players=None, week=None)` returns a `Decision` — resolved players/week, the context sent to the LLM, and the validated `Recommendation`; CLI: `python -m pipeline.decision_engine "Should I start X or Y in week 18?"`; `tests/test_decision_engine.py` covers orchestration with a stubbed LLM. Note: `latest_week()` is the most recently *completed* week — see PROGRESS_LOG's known limitation)
 - **Phase 4 — FastAPI backend: not started**
 - **Phase 5 — React frontend: not started**
 - **Phase 6 — News RAG: not started**

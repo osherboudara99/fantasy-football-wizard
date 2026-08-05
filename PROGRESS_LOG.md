@@ -24,3 +24,38 @@ Append-only, one entry per completed phase.
   three processed tables refresh together, but latent if injuries are ever
   refreshed on their own cadence (README §11).
 - Approx LLM $ spent this phase: $0 (no LLM calls — regex/Pandas only).
+
+## 2026-08-05 — Phase 3: Decision engine end-to-end
+
+- Shipped `pipeline/decision_engine.py`: `decide(question, players=None, week=None)`
+  resolves players/week (explicit args → entity extraction → data's latest week),
+  builds the §7 context, calls `run_llm()`, and returns a `Decision` (question,
+  players, week, context, recommendation). CLI:
+  `python -m pipeline.decision_engine "Should I start X or Y in week 18?" [--show-context]`.
+- Done-check: PASS — real terminal run on 2025 week 18 data
+  ("T.J. Hockenson or Chris Godwin Jr.") returned START Godwin / BENCH Hockenson
+  at 98% confidence, citing Hockenson's Out status; independently re-run by a
+  fresh checker subagent with its own player pair.
+- Tests: `python -m pytest -q` → 30 passed. Lint: `ruff check .` → clean.
+- Checker pass found four real defects, all fixed before marking the phase done:
+  1. Sleeper ships ~20% of its `gsis_id`s whitespace-padded, so the full join in
+     `build_staged_injuries` split those players into two rows — one real report
+     plus a Sleeper row defaulting to "Healthy". T.J. Hockenson (Out) rendered as
+     "Healthy". Fixed by stripping the ids at staging.
+  2. `context_builder` joined projections/injuries by `player_name` while
+     `player_id` sits on all three tables — nflverse display names ("Kenneth
+     Walker III") don't match Sleeper's ("Kenneth Walker"), silently dropping 86
+     players' projections. Now keyed on `player_id`, and a real injury report
+     always outranks a "Healthy" duplicate.
+  3. `week 0` in a question is falsy, so `extract_week(...) or latest_week()`
+     silently answered for a different week. Split into `resolve_week()`.
+  4. Nothing checked the LLM's answer against the question — a hallucinated name
+     or 187% confidence rendered fine. Added `_check_recommendation()` plus
+     `ge=0, le=1` on `Recommendation.confidence`.
+- Known limitation (not fixed, flagged to the user): `latest_week()` returns the
+  most recently *completed* week, because that's what `refresh_stats.py` resolves
+  and fetches projections for. In-season this answers about a game already
+  played; asking for the upcoming week raises `PlayerNotFoundError`. Fixing it
+  means changing Phase 1's week resolution — a scope decision, not a Phase 3 bug.
+- Approx LLM $ spent this phase: ~$0.02 (3 real `claude-haiku-4-5` calls: 2 by
+  the builder, 1 by the checker).
