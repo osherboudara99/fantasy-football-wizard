@@ -34,6 +34,14 @@ class DecisionError(ValueError):
     """Raised when a question can't be turned into a well-formed two-player decision."""
 
 
+class DataUnavailableError(DecisionError):
+    """Raised when the processed data needed to answer anything is missing or empty.
+
+    Distinct from a bad question: nothing the caller sends can fix it, so callers
+    (the API) can report it as a server-side outage rather than user error.
+    """
+
+
 @dataclass
 class Decision:
     """A recommendation plus everything that produced it, for debugging and display."""
@@ -58,7 +66,7 @@ def target_week() -> int:
     """
     weeks = pl.read_parquet(PROCESSED_DIR / "player_stats.parquet", columns=["week"])
     if weeks.height == 0:
-        raise DecisionError(
+        raise DataUnavailableError(
             "data/processed/player_stats.parquet is empty - run python scripts/refresh_stats.py"
         )
     return int(weeks.get_column("week").max())
@@ -72,6 +80,11 @@ def resolve_players(question: str, players: list[str] | None) -> list[str]:
             f"expected {REQUIRED_PLAYERS} known players, found {len(resolved)}: {resolved}. "
             "Name both players as they appear in the processed stats."
         )
+    # Comparing a player to himself is never a real question, and it would slip
+    # past the set-based check in _check_recommendation (a one-element set matches
+    # a one-element set, so start == bench would look valid).
+    if len({name.strip().casefold() for name in resolved}) != REQUIRED_PLAYERS:
+        raise DecisionError(f"expected two different players, got {resolved}")
     return resolved
 
 

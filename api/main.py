@@ -11,18 +11,31 @@ from __future__ import annotations
 
 import os
 
+from typing import Annotated
+
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from pipeline.context_builder import PlayerNotFoundError
-from pipeline.decision_engine import REQUIRED_PLAYERS, DecisionError, decide
+from pipeline.decision_engine import (
+    REQUIRED_PLAYERS,
+    DataUnavailableError,
+    DecisionError,
+    decide,
+)
 from pipeline.entity_extraction import known_player_names
 
 # The frontend is a separate origin in dev (Vite on 5173) and in prod (Cloudflare
 # Pages), so the allowed origins have to be configurable per deployment.
 DEFAULT_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
+
+# Every request that reaches decide() costs a paid LLM call whose price scales with
+# the input, and `question` is passed straight into the prompt. Cap both the question
+# and each name so a caller can't turn one request into a six-figure-token bill.
+MAX_QUESTION_LENGTH = 500
+MAX_PLAYER_NAME_LENGTH = 100
 
 load_dotenv()
 
@@ -40,7 +53,7 @@ app.add_middleware(
 
 
 class RecommendationRequest(BaseModel):
-    players: list[str] = Field(
+    players: list[Annotated[str, StringConstraints(max_length=MAX_PLAYER_NAME_LENGTH)]] = Field(
         min_length=REQUIRED_PLAYERS,
         max_length=REQUIRED_PLAYERS,
         description="The two players to compare",
@@ -48,7 +61,11 @@ class RecommendationRequest(BaseModel):
     week: int | None = Field(
         default=None, description="Defaults to the week the processed data describes"
     )
-    question: str | None = Field(default=None, description="Optional free-text question")
+    question: str | None = Field(
+        default=None,
+        max_length=MAX_QUESTION_LENGTH,
+        description="Optional free-text question",
+    )
 
 
 class RecommendationResponse(BaseModel):
@@ -88,6 +105,12 @@ def recommendation(request: RecommendationRequest) -> RecommendationResponse:
         # Unknown player or a week the data doesn't cover: the caller's input is
         # wrong, not the server - 404 rather than a 500 stack trace.
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DataUnavailableError as exc:
+        # The refresh job hasn't populated data/ - nothing the caller can fix, and
+        # the underlying message names server paths, so don't echo it back.
+        raise HTTPException(
+            status_code=503, detail="Player data is unavailable; try again later."
+        ) from exc
     except DecisionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
