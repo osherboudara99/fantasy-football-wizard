@@ -35,6 +35,67 @@ def test_build_context_formats_two_player_comparison():
         "- Projected points: 14.3\n- Injury: Healthy" in context
 
 
+def _id_keyed_tables():
+    """Real-data shape: player_id on every table, and names that disagree across
+    tables (nflverse "Kenneth Walker III" vs Sleeper's "Kenneth Walker").
+    """
+    player_stats = pl.DataFrame({
+        "player_id": ["00-1"],
+        "player_name": ["Kenneth Walker III"],
+        "week": [18],
+        "avg_fantasy_points_last3": [11.0],
+    })
+    projections = pl.DataFrame({
+        "player_id": ["00-1"],
+        "player_name": ["Kenneth Walker"],
+        "week": [18],
+        "projected_points": [12.17],
+    })
+    injuries = pl.DataFrame({
+        "player_id": ["00-1"],
+        "player_name": ["Kenneth Walker"],
+        "status": ["Questionable"],
+        "practice_level": ["Limited Participation"],
+    })
+    return {"player_stats": player_stats, "projections": projections, "injuries": injuries}
+
+
+def test_build_context_joins_on_player_id_not_name():
+    """Suffixed names differ between sources; the projection and injury must still land."""
+    context = build_context(["Kenneth Walker III"], week=18, tables=_id_keyed_tables())
+
+    assert "- Projected points: 12.2" in context
+    assert "- Injury: Questionable -> Limited Participation" in context
+
+
+def test_build_context_prefers_a_real_injury_report_over_a_healthy_duplicate():
+    """A player with two injury rows must never be reported healthy by row ordering."""
+    tables = _id_keyed_tables()
+    tables["injuries"] = pl.DataFrame({
+        "player_id": ["00-1", "00-1"],
+        "player_name": ["Kenneth Walker", "Kenneth Walker"],
+        "status": ["Healthy", "Out"],
+        "practice_level": [None, "Did Not Participate In Practice"],
+    })
+
+    context = build_context(["Kenneth Walker III"], week=18, tables=tables)
+    assert "- Injury: Out -> Did Not Participate In Practice" in context
+
+
+def test_build_context_ignores_another_players_projection_for_the_same_week():
+    """Matching by id must not pick up a different player's row."""
+    tables = _id_keyed_tables()
+    tables["projections"] = pl.DataFrame({
+        "player_id": ["00-2"],
+        "player_name": ["Somebody Else"],
+        "week": [18],
+        "projected_points": [30.0],
+    })
+
+    context = build_context(["Kenneth Walker III"], week=18, tables=tables)
+    assert "Projected points" not in context
+
+
 def test_build_context_raises_for_unknown_player():
     """A player missing from processed stats for the requested week is a clear error, not a silent skip."""
     with pytest.raises(PlayerNotFoundError):
