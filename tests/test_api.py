@@ -1,10 +1,10 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from api.main import app
+from api.main import MAX_PLAYER_NAME_LENGTH, MAX_QUESTION_LENGTH, app
 from llm.interface import Recommendation
 from pipeline.context_builder import PlayerNotFoundError
-from pipeline.decision_engine import Decision, DecisionError
+from pipeline.decision_engine import DataUnavailableError, Decision, DecisionError
 
 client = TestClient(app)
 
@@ -51,6 +51,8 @@ def test_post_recommendation_returns_the_decision_as_json(stub_decide):
     assert body["confidence"] == 0.72
     assert body["week"] == 5
     assert body["players"] == ["Jordan Love", "Jared Goff"]
+    assert body["key_factors"] == ["Higher recent average"]
+    assert body["risk_factors"] == ["Questionable injury tag"]
     assert body["context"].startswith("PLAYER COMPARISON")
 
 
@@ -73,13 +75,68 @@ def test_post_recommendation_passes_a_free_text_question_through(stub_decide):
     assert stub_decide["question"] == "Who has the better matchup?"
 
 
+@pytest.fixture
+def forbid_decide(monkeypatch):
+    """Assert the pipeline is never entered - a rejected request costs no LLM call."""
+    def fail(*_, **__):
+        raise AssertionError("decide() should not be called for an invalid request")
+
+    monkeypatch.setattr("api.main.decide", fail)
+
+
 @pytest.mark.parametrize(
     "players", [[], ["Jordan Love"], ["Jordan Love", "Jared Goff", "Bo Nix"]]
 )
-def test_post_recommendation_rejects_anything_but_two_players(players):
+def test_post_recommendation_rejects_anything_but_two_players(players, forbid_decide):
     """Caught by the request schema, so the pipeline is never entered."""
     response = client.post("/recommendation", json={"players": players})
     assert response.status_code == 422
+
+
+def test_post_recommendation_rejects_an_overlong_question(forbid_decide):
+    """`question` lands in the prompt, so an unbounded one is a paid-token hole."""
+    response = client.post(
+        "/recommendation",
+        json={
+            "players": ["Jordan Love", "Jared Goff"],
+            "question": "a" * (MAX_QUESTION_LENGTH + 1),
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_post_recommendation_rejects_an_overlong_player_name(forbid_decide):
+    response = client.post(
+        "/recommendation",
+        json={"players": ["a" * (MAX_PLAYER_NAME_LENGTH + 1), "Jared Goff"]},
+    )
+    assert response.status_code == 422
+
+
+def test_post_recommendation_rejects_the_same_player_twice():
+    """A player against himself would otherwise pass the start/bench set check.
+
+    Deliberately not stubbed: the real decide() must reject this before it reads
+    any data or spends an LLM call.
+    """
+    response = client.post(
+        "/recommendation", json={"players": ["Jordan Love", "jordan love "]}
+    )
+    assert response.status_code == 400
+
+
+def test_missing_data_is_a_503_that_hides_server_paths(monkeypatch):
+    """A failed refresh is an outage, not the caller's fault - and shouldn't leak paths."""
+    def raise_unavailable(*_, **__):
+        raise DataUnavailableError(
+            "data/processed/player_stats.parquet is empty - run python scripts/refresh_stats.py"
+        )
+
+    monkeypatch.setattr("api.main.decide", raise_unavailable)
+    response = client.post("/recommendation", json={"players": ["Jordan Love", "Jared Goff"]})
+
+    assert response.status_code == 503
+    assert "parquet" not in response.json()["detail"]
 
 
 def test_unknown_player_is_a_404_not_a_500(monkeypatch):
@@ -101,6 +158,7 @@ def test_decision_error_is_a_400(monkeypatch):
     response = client.post("/recommendation", json={"players": ["Jordan Love", "Jared Goff"]})
 
     assert response.status_code == 400
+    assert response.json()["detail"] == "LLM answered about someone else"
 
 
 def test_get_players_returns_the_known_name_universe(monkeypatch):
