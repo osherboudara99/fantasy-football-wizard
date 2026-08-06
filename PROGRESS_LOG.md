@@ -125,3 +125,45 @@ Raised by the Phase 3 checker as a known limitation, then fixed on user request
   paid endpoint's schema).
 - Approx LLM $ spent this phase: ~$0.02 (2 real `claude-haiku-4-5` calls: 1 by the
   builder, 1 by the checker; all input-bound tests reject before the LLM).
+
+## 2026-08-06 — Phase 5: React frontend
+
+- Shipped `frontend/`: Vite + React (JS, not TS) app. `src/api.js` wraps
+  `GET /players` and `POST /recommendation` (`VITE_API_BASE_URL` env var,
+  defaults to `http://localhost:8000`, matching the FastAPI CORS default
+  origin `http://localhost:5173`). `src/App.jsx` holds two `<select>` player
+  pickers (each disables the other's current pick so the two players can't
+  match), an optional free-text question (500-char cap, mirrors the API's
+  limit) and an optional week override, and calls the API on submit.
+  `src/ResultCard.jsx` renders start/bench, a confidence bar, key/risk
+  factor lists, and a collapsible `<details>` debug view of the raw context
+  string the recommendation was built from (README §10's optional debug
+  view). Removed the Vite template's default counter/hero boilerplate.
+- Done-check: PASS — `npm run build` and `npx oxlint` both clean; a real
+  `POST /recommendation` round-trip through the browser-facing CORS path
+  (`Origin: http://localhost:5173`) returned a valid recommendation matching
+  `ResultCard.jsx`'s expected shape byte-for-byte. The Claude-in-Chrome
+  browser extension wasn't connected this session, so the visual pass was
+  done by the user directly in a browser tab (both dev servers running
+  locally) rather than by an automated agent — confirmed working.
+- Tests: no JS test framework was added (none existed in the repo to match,
+  and the done-check is a manual end-to-end flow, not unit-testable
+  business logic — the frontend has none, by design). `npm run build`
+  clean, `npx oxlint` clean. Backend suite unaffected:
+  `python -m pytest -q` → 48 passed, `ruff check .` → clean.
+- User feedback after the done-check passed (2026-08-06), explicitly
+  deferred until after Phase 7 deployment rather than reworked now:
+  1. The `<select>` player pickers don't scale — too many players to scan;
+     wants a searchable/typeahead input instead.
+  2. Wants defense/DST options so team defenses can be compared, not just
+     offensive skill players — no current data source in the pipeline is
+     wired for DST, needs scoping.
+  3. Wants a league scoring config (e.g. reception points) so projections
+     reflect the user's actual league rules instead of a fixed default.
+  4. Wants personal branding on the page: name plus LinkedIn/GitHub links.
+  Logged in README §10 as "Post-deployment backlog." Decision: ship Phase 5
+  as-is, proceed through the remaining roadmap phases, revisit this list
+  after Phase 7 has a deployed URL to iterate against.
+- Approx LLM $ spent this phase: ~$0.01-0.02 (1 real `claude-haiku-4-5` call
+  during the builder's CORS/end-to-end check, plus at least 1 more from the
+  user's manual browser test).
