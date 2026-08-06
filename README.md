@@ -32,10 +32,10 @@ Ordered execution plan. Each phase references the detailed sections below; a pha
 | **1. Structured data ingestion** *(done)* | Rebuild `scripts/refresh_stats.py` on nflreadpy (stats, snap counts, xFP, injuries, depth charts, schedules); Sleeper player-dump + projections fetchers; Parquet in `data/` via raw→staged→processed; join on `load_ff_playerids()` | §1.5, §3 | One command refreshes all Parquet artifacts for the upcoming week |
 | **2. Context builder** *(done)* | `pipeline/entity_extraction.py` (regex player/week parsing); `pipeline/context_builder.py` producing LLM-ready comparison text from Parquet | §5–§7 | `build_context(["Player A", "Player B"], week)` returns the §7 format; unit-tested with fixture data |
 | **3. Decision engine end-to-end** *(done)* | `pipeline/decision_engine.py`: context builder → `run_llm()` → `Recommendation` | §8–§9 | A real two-player question answers correctly from the terminal |
-| **4. FastAPI backend** | `api/main.py` with `POST /recommendation` and `GET /players`; `.env` loaded at startup; CORS for frontend origin | §14 | `curl` returns a recommendation JSON |
+| **4. FastAPI backend** *(done)* | `api/main.py` with `POST /recommendation` and `GET /players`; `.env` loaded at startup; CORS for frontend origin | §14 | `curl` returns a recommendation JSON |
 | **5. React frontend** | `frontend/` Vite app: player pickers, question input, recommendation + confidence display | §10 | Full flow works locally against FastAPI |
 | **6. News RAG** | `scripts/refresh_news.py` (RSS feeds); `embeddings/build_embeddings.py` (sentence-transformers → Chroma, player-ID + date metadata); `retrieval/news_retriever.py` (top-k, ≤7-day filter); wire into context builder | §4, §6.2 | Recommendations cite recent news |
-| **7. Deployment** | Dockerfile (no torch in API image); Cloud Run service; GCS-backed data/Chroma; Cloud Run Jobs + Scheduler for refresh; Cloudflare Pages frontend | §13 | Public URL serves a recommendation |
+| **7. Deployment** | Dockerfile (no torch in API image); Cloud Run service; GCS-backed data/Chroma; Cloud Run Jobs + Scheduler for refresh; Cloudflare Pages frontend; **rate limiting on `POST /recommendation`** (decided Aug 2026 — see §14) | §13, §14 | Public URL serves a recommendation |
 | **8. Evaluation** | Log recommendations vs FantasyPros consensus and actual weekly outcomes | §12 | Week-over-week agreement tracking exists |
 
 
@@ -539,6 +539,28 @@ Benefits include:
 - **Scalability:** Easier to deploy and scale in the cloud.
 - **Debugging:** Endpoints can be tested independently with tools like Postman or `curl`.
 - **Resume Value:** Demonstrates experience building a production-ready ML API.
+
+### Rate limiting (required before going public — Phase 7)
+
+`POST /recommendation` spends the owner's Anthropic credits on every call, and the
+local build has no auth or rate limiting. CORS is not a defense — it only constrains
+browsers, and `curl` ignores it entirely. Before the service gets a public Cloud Run
+URL it needs a per-caller limit; the input caps already in `api/main.py`
+(`MAX_QUESTION_LENGTH`, `MAX_PLAYER_NAME_LENGTH`) bound the cost of a single request
+but not the number of requests.
+
+Options, cheapest first:
+- **Cloud Armor rate-limit policy** in front of Cloud Run — per-IP throttling with no
+  application code, and it drops abuse before it reaches a billable container.
+- **`slowapi`** (Starlette middleware, in-process) — simple, but per-instance rather
+  than global, so scale-out multiplies the effective limit.
+- **A shared secret header** the frontend sends — trivially extractable from a public
+  SPA, so it deters scripts but doesn't stop a determined caller; pair it with one of
+  the above rather than relying on it alone.
+
+`/docs`, `/redoc`, and `/openapi.json` are also open (they contain no secrets, but
+they do advertise the paid endpoint's schema) — consider disabling them in prod via
+`FastAPI(docs_url=None, redoc_url=None, openapi_url=None)`.
 
 ### Example FastAPI Endpoint
 

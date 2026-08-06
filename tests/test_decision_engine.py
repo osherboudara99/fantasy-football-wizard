@@ -156,6 +156,12 @@ def test_resolve_players_requires_exactly_two(found):
         resolve_players("some question", found)
 
 
+def test_resolve_players_rejects_the_same_player_twice():
+    """start == bench would satisfy the set-based output check, so block it up front."""
+    with pytest.raises(DecisionError):
+        resolve_players("some question", ["Jordan Love", "jordan love "])
+
+
 def test_target_week_reads_the_max_week_in_processed_stats(monkeypatch):
     fixture = pl.DataFrame({"week": [16, 18, 17]})
     monkeypatch.setattr("pipeline.decision_engine.pl.read_parquet", lambda *_, **__: fixture)

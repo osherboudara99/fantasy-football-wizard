@@ -85,3 +85,43 @@ Raised by the Phase 3 checker as a known limitation, then fixed on user request
   START Bijan at 72%.
 - Tests: `python -m pytest -q` → 33 passed. Lint: `ruff check .` → clean.
 - Approx LLM $ spent: ~$0.01 (1 real `claude-haiku-4-5` call).
+
+## 2026-08-05 — Phase 4: FastAPI backend
+
+- Shipped `api/main.py`: `POST /recommendation` (two players + optional week and
+  free-text question → the `Recommendation` fields plus the resolved week, players,
+  and the context the answer was built from, for README §10's debug view),
+  `GET /players` for the frontend picker, and `GET /health` for Cloud Run's probe.
+  `.env` is loaded at startup and CORS origins come from `FRONTEND_ORIGINS`
+  (default: Vite on localhost:5173). The API owns no logic — it validates input,
+  calls `decide()`, and maps pipeline errors to status codes.
+- Done-check: PASS — `curl -X POST localhost:8000/recommendation -d
+  '{"players":["Bijan Robinson","Jahmyr Gibbs"]}'` returned 200 with a valid
+  recommendation JSON; independently re-run by a fresh checker subagent with its
+  own player pair, which also confirmed the returned `context` matches what
+  `build_context()` produces byte-for-byte.
+- Tests: `python -m pytest -q` → 48 passed. Lint: `ruff check .` → clean.
+- Checker pass found four real defects, all fixed:
+  1. `question` was unbounded and goes straight into the prompt — a 520K-char
+     question reached the LLM (~130K input tokens, ~$0.13 for one request, ~26x
+     the per-recommendation budget). Now capped at 500 chars, names at 100.
+  2. `["X", "X"]` passed validation, spent a paid call, and could return
+     `start == bench` — `_check_recommendation` compares *sets*, so a one-element
+     set matched a one-element set. `resolve_players` now requires two distinct
+     names (fixes the CLI path too).
+  3. A failed refresh surfaced as `400` echoing a server filesystem path and a
+     runbook command. Added `DataUnavailableError` → `503` with a generic message,
+     so outages are server errors and alerting can see them.
+  4. Tests that asserted status codes without proving the pipeline wasn't entered,
+     and a 400 test that never checked the detail — tightened.
+- Verified clean by the checker: no secret ever reaches a response body (including
+  a simulated provider error carrying a fake key — response was a bare 500), CORS
+  is not accidentally permissive (`allow_credentials` stays False), and endpoints
+  are sync `def` so blocking parquet/LLM work runs in the threadpool.
+- Known gap, deliberate: **no auth or rate limiting**. Harmless locally, but
+  `POST /recommendation` spends the owner's API credits per call, so this must be
+  addressed in Phase 7 before the service gets a public URL. `/docs`, `/redoc`,
+  and `/openapi.json` are open too (no secrets in them, but they advertise the
+  paid endpoint's schema).
+- Approx LLM $ spent this phase: ~$0.02 (2 real `claude-haiku-4-5` calls: 1 by the
+  builder, 1 by the checker; all input-bound tests reject before the LLM).
