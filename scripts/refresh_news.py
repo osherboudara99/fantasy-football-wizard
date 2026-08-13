@@ -160,13 +160,26 @@ def tag_and_filter(raw: pl.DataFrame, max_age_days: int, known_names: list[str] 
         return pl.DataFrame(schema=TAGGED_NEWS_SCHEMA)
 
     tagged = pl.DataFrame(rows)
-    id_map = (
-        pl.read_parquet(PROCESSED_DIR / "player_stats.parquet", columns=["player_id", "player_name"])
-        .unique(subset=["player_name"])
+    # player_stats can carry two different real players under the same display
+    # name (e.g. two "Byron Young"s, a DT and an LB) - .unique(subset=["player_name"])
+    # would arbitrarily keep one of their ids, silently misattributing every article
+    # about either player to whichever one happened to survive the dedup. There's no
+    # fuzzy/context-based way to tell them apart from RSS title/description text
+    # (README's "never implement fuzzy player-name matching"), so an ambiguous name
+    # is dropped rather than guessed - same "clear failure over a silent guess"
+    # stance as PlayerNotFoundError and the hallucinated-name check elsewhere.
+    id_map = pl.read_parquet(
+        PROCESSED_DIR / "player_stats.parquet", columns=["player_id", "player_name"]
+    ).drop_nulls().unique()
+    unambiguous_names = (
+        id_map.group_by("player_name").agg(pl.len().alias("n")).filter(pl.col("n") == 1)
     )
+    id_map = id_map.join(unambiguous_names, on="player_name", how="semi")
+
     tagged = tagged.join(id_map, on="player_name", how="left")
     return (
-        tagged.select(list(TAGGED_NEWS_SCHEMA))
+        tagged.filter(pl.col("player_id").is_not_null())
+        .select(list(TAGGED_NEWS_SCHEMA))
         .unique(subset=["player_id", "link"])
     )
 

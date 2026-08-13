@@ -131,3 +131,20 @@ def test_tag_and_filter_joins_player_id_from_processed_player_stats(monkeypatch)
 
     tagged = tag_and_filter(raw, max_age_days=10, known_names=KNOWN_NAMES)
     assert tagged.row(0, named=True)["player_id"] == "00-1"
+
+
+def test_tag_and_filter_drops_articles_about_an_ambiguous_player_name(monkeypatch):
+    """Two real players can share a display name (e.g. two "Byron Young"s) - an
+    article about either must be dropped, never silently attached to the wrong id.
+    """
+    now = datetime.now(timezone.utc)
+    raw = pl.DataFrame([_raw_row("Jordan Love update", "Packers QB is fine.", now)],
+                        schema=NEWS_SCHEMA)
+    id_map = pl.DataFrame({
+        "player_id": ["00-1", "00-2"],
+        "player_name": ["Jordan Love", "Jordan Love"],
+    })
+    monkeypatch.setattr("scripts.refresh_news.pl.read_parquet", lambda *_, **__: id_map)
+
+    tagged = tag_and_filter(raw, max_age_days=10, known_names=KNOWN_NAMES)
+    assert tagged.height == 0
