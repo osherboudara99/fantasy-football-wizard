@@ -33,7 +33,7 @@ Ordered execution plan. Each phase references the detailed sections below; a pha
 | **2. Context builder** *(done)* | `pipeline/entity_extraction.py` (regex player/week parsing); `pipeline/context_builder.py` producing LLM-ready comparison text from Parquet | §5–§7 | `build_context(["Player A", "Player B"], week)` returns the §7 format; unit-tested with fixture data |
 | **3. Decision engine end-to-end** *(done)* | `pipeline/decision_engine.py`: context builder → `run_llm()` → `Recommendation` | §8–§9 | A real two-player question answers correctly from the terminal |
 | **4. FastAPI backend** *(done)* | `api/main.py` with `POST /recommendation` and `GET /players`; `.env` loaded at startup; CORS for frontend origin | §14 | `curl` returns a recommendation JSON |
-| **5. React frontend** | `frontend/` Vite app: player pickers, question input, recommendation + confidence display | §10 | Full flow works locally against FastAPI |
+| **5. React frontend** *(done)* | `frontend/` Vite app: player pickers, question input, recommendation + confidence display | §10 | Full flow works locally against FastAPI |
 | **6. News RAG** | `scripts/refresh_news.py` (RSS feeds); `embeddings/build_embeddings.py` (sentence-transformers → Chroma, player-ID + date metadata); `retrieval/news_retriever.py` (top-k, ≤7-day filter); wire into context builder | §4, §6.2 | Recommendations cite recent news |
 | **7. Deployment** | Dockerfile (no torch in API image); Cloud Run service; GCS-backed data/Chroma; Cloud Run Jobs + Scheduler for refresh; Cloudflare Pages frontend; **rate limiting on `POST /recommendation`** (decided Aug 2026 — see §14) | §13, §14 | Public URL serves a recommendation |
 | **8. Evaluation** | Log recommendations vs FantasyPros consensus and actual weekly outcomes | §12 | Week-over-week agreement tracking exists |
@@ -481,6 +481,12 @@ UI for interacting with the fantasy assistant.
 **Optional Enhancements**
 - Source citations
 - Debug view showing injected context
+
+**Post-deployment backlog** (raised by the user after the Phase 5 done-check passed, 2026-08-06 — deliberately deferred: ship Phase 5 as-is, deploy per Phase 7, then iterate):
+- Replace the `<select>` player pickers with a searchable/typeahead input — the full player list is too long to scan
+- Add defense/DST options so team defenses can be compared, not just offensive skill players (needs a defense data source — none of the current nflreadpy/Sleeper tables used are wired for DST; scope during implementation)
+- League scoring config (e.g. reception points, custom scoring rules) so projections/recommendations reflect the user's actual league instead of a fixed default
+- Personal branding on the page: the user's name plus links to their LinkedIn and GitHub
 
 ---
 
