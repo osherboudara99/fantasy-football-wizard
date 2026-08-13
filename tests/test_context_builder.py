@@ -96,6 +96,50 @@ def test_build_context_ignores_another_players_projection_for_the_same_week():
     assert "Projected points" not in context
 
 
+def test_build_context_omits_news_bullet_when_news_fn_is_not_passed():
+    """Pre-Phase-6 callers (no news_fn) must see byte-identical output - no bullet at all."""
+    context = build_context(["Jordan Love", "Jared Goff"], week=5, tables=_fixture_tables())
+    assert "Recent news" not in context
+
+
+def test_build_context_omits_news_bullet_when_news_fn_returns_nothing():
+    context = build_context(
+        ["Jordan Love", "Jared Goff"], week=5, tables=_fixture_tables(), news_fn=lambda *_: []
+    )
+    assert "Recent news" not in context
+
+
+def test_build_context_adds_a_news_bullet_per_snippet_when_news_fn_returns_some():
+    def news_fn(player_id, player_name):
+        return ["Packers plan to stay aggressive..."] if player_name == "Jordan Love" else []
+
+    context = build_context(
+        ["Jordan Love", "Jared Goff"], week=5, tables=_fixture_tables(), news_fn=news_fn
+    )
+
+    assert (
+        "Jordan Love:\n- Avg fantasy points (last 3 weeks): 18.4\n"
+        "- Projected points: 17.1\n- Injury: Questionable -> Full practice Friday\n"
+        '- Recent news:\n  - "Packers plan to stay aggressive..."' in context
+    )
+    assert "Jared Goff:\n- Avg fantasy points (last 3 weeks): 12.1\n" \
+        "- Projected points: 14.3\n- Injury: Healthy" in context
+    assert "Recent news" not in context.split("Jared Goff:")[1]
+
+
+def test_build_context_passes_player_id_to_news_fn():
+    """news_fn must be able to filter by the same player_id the projections/injuries join uses."""
+    seen = {}
+
+    def news_fn(player_id, player_name):
+        seen["player_id"] = player_id
+        seen["player_name"] = player_name
+        return []
+
+    build_context(["Kenneth Walker III"], week=18, tables=_id_keyed_tables(), news_fn=news_fn)
+    assert seen == {"player_id": "00-1", "player_name": "Kenneth Walker III"}
+
+
 def test_build_context_raises_for_unknown_player():
     """A player missing from processed stats for the requested week is a clear error, not a silent skip."""
     with pytest.raises(PlayerNotFoundError):

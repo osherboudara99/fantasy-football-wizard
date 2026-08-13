@@ -167,3 +167,75 @@ Raised by the Phase 3 checker as a known limitation, then fixed on user request
 - Approx LLM $ spent this phase: ~$0.01-0.02 (1 real `claude-haiku-4-5` call
   during the builder's CORS/end-to-end check, plus at least 1 more from the
   user's manual browser test).
+
+## 2026-08-12 — Phase 6: News RAG
+
+- Shipped `scripts/refresh_news.py` (fetches ESPN/Yahoo/RotoBaller RSS, tags each
+  item with known player(s) it mentions via `pipeline.entity_extraction`'s regex
+  matcher, drops items with no known player or no parseable pubDate, keeps items
+  from the last `--max-age-days` days (default 10, per README §4.1), joins
+  `player_id` from `data/processed/player_stats.parquet` -> `data/{raw,processed}/news.parquet`;
+  run as `python -m scripts.refresh_news` since it imports `pipeline`).
+  `embeddings/build_embeddings.py` (embeds tagged rows with `sentence-transformers`
+  `all-MiniLM-L6-v2` and upserts into a Chroma `news` collection at
+  `embeddings/chroma_db/`, id'd `{player_id}:{link}` so reruns upsert rather than
+  duplicate; embedding only happens here, never in the API request path, per
+  README §13). `retrieval/news_retriever.py`'s `retrieve_news(player_id,
+  player_name, k=3, max_age_days=7)` does a Chroma metadata-filtered
+  (`player_id` + `published_ts >= cutoff`) semantic query and returns `[]`
+  (never raises) if nothing's indexed yet. `pipeline/context_builder.build_context()`
+  gained an optional `news_fn` param that adds the §7 "Recent news" bullet only
+  when passed - existing callers with no `news_fn` see byte-identical output, so
+  Phase 2/3 tests needed zero changes to their assertions; `decide()` wires in
+  the real retriever by default (tests override with a stub to stay hermetic).
+- Done-check: PASS - a real end-to-end run (`refresh_stats` -> `refresh_news` ->
+  `build_embeddings` -> `decide()`, 2026 week 1 real data) produced a context
+  with 3 "Recent news" bullets for Aaron Rodgers (real ESPN/Yahoo headlines about
+  his Lambeau Field return) and 1 for Bo Nix, and the LLM's actual recommendation
+  cited one in its risk factors ("Bo Nix's 2026 season described as critical -
+  could indicate uncertainty about consistency"); independently re-run by a fresh
+  checker subagent with its own player pair.
+- Tests: `python -m pytest -q` -> 73 passed (7 new: `test_refresh_news.py`,
+  `test_news_retriever.py`, `test_build_embeddings.py`, plus context-builder news
+  wiring cases). `ruff check .` -> clean. All new Chroma-touching tests use
+  `chromadb.EphemeralClient()` with fixture embeddings/stub encoders - no real
+  model load or network call in the suite.
+- Bugs found and fixed during the builder's own real-data run (not by the
+  checker - caught before requesting review):
+  1. `chromadb.EphemeralClient()` shares its underlying store across instances
+     within one process, so `test_build_embeddings.py` and `test_news_retriever.py`
+     both writing to a collection literally named "news" leaked documents
+     between test files depending on run order. Fixed by giving every test a
+     unique collection name (`news-test-<uuid>`), monkeypatching
+     `build_embeddings`'s module-level `COLLECTION_NAME` where needed.
+  2. `tag_and_filter`'s recency cutoff (`datetime.now(timezone.utc)`, tz-aware)
+     compared against a `published_at` column declared as tz-naive
+     `Datetime("us")` raised a polars `SchemaError` on any real (or fixture)
+     tz-aware timestamp. Fixed by declaring the column `Datetime("us", "UTC")`.
+  3. RSS titles came through with literal double-encoded HTML entities (e.g.
+     `Aaron Rodgers &quot;bummed&quot;...`) because only `description` was
+     cleaned, not `title`. Both now go through the same `_clean_text()`
+     (BeautifulSoup markup strip + `html.unescape`), verified against the real
+     ESPN feed.
+- Checker pass: independently re-ran the done-check against real live data with
+  its own player pair (Christian McCaffrey vs. Chase Brown, not the builder's
+  Aaron Rodgers/Bo Nix) - PASS, confirmed reproducible rather than a one-off.
+  Ran the full pytest suite 7 times (including `-p no:randomly`) to rule out
+  order-dependent flakiness in the Chroma test isolation fix - none found.
+  Found one real defect, fixed before marking the phase done:
+  4. `tag_and_filter`'s `id_map.unique(subset=["player_name"])` arbitrarily kept
+     one `player_id` when two different real players share a display name -
+     verified live in the current `player_stats.parquet` ("Byron Young": a DT
+     and an LB with different ids; "Jaylon Jones" likewise). Any article about
+     either would have been silently misattributed to whichever id survived the
+     dedup, with no error. Fixed by dropping tags for any name that maps to more
+     than one `player_id` instead of guessing - consistent with this app's
+     existing "clear failure over a silent guess" stance (`PlayerNotFoundError`,
+     the hallucinated-recommendation check) and CLAUDE.md's "never implement
+     fuzzy player-name matching." Narrow blast radius (2 of 1447 names in live
+     data) but same silent-mismatched-join bug class flagged in Phases 3-4's
+     checker passes, so treated as blocking rather than deferred.
+- Tests after the fix: `python -m pytest -q` -> 74 passed (1 new regression
+  test for the ambiguous-name-drop behavior). `ruff check .` -> clean.
+- Approx LLM $ spent this phase: ~$0.02 (1 real `claude-haiku-4-5` call each
+  from the builder's and the checker's end-to-end done-check runs).
