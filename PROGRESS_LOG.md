@@ -217,5 +217,25 @@ Raised by the Phase 3 checker as a known limitation, then fixed on user request
      cleaned, not `title`. Both now go through the same `_clean_text()`
      (BeautifulSoup markup strip + `html.unescape`), verified against the real
      ESPN feed.
-- Approx LLM $ spent this phase: ~$0.01 (1 real `claude-haiku-4-5` call for the
-  builder's end-to-end done-check).
+- Checker pass: independently re-ran the done-check against real live data with
+  its own player pair (Christian McCaffrey vs. Chase Brown, not the builder's
+  Aaron Rodgers/Bo Nix) - PASS, confirmed reproducible rather than a one-off.
+  Ran the full pytest suite 7 times (including `-p no:randomly`) to rule out
+  order-dependent flakiness in the Chroma test isolation fix - none found.
+  Found one real defect, fixed before marking the phase done:
+  4. `tag_and_filter`'s `id_map.unique(subset=["player_name"])` arbitrarily kept
+     one `player_id` when two different real players share a display name -
+     verified live in the current `player_stats.parquet` ("Byron Young": a DT
+     and an LB with different ids; "Jaylon Jones" likewise). Any article about
+     either would have been silently misattributed to whichever id survived the
+     dedup, with no error. Fixed by dropping tags for any name that maps to more
+     than one `player_id` instead of guessing - consistent with this app's
+     existing "clear failure over a silent guess" stance (`PlayerNotFoundError`,
+     the hallucinated-recommendation check) and CLAUDE.md's "never implement
+     fuzzy player-name matching." Narrow blast radius (2 of 1447 names in live
+     data) but same silent-mismatched-join bug class flagged in Phases 3-4's
+     checker passes, so treated as blocking rather than deferred.
+- Tests after the fix: `python -m pytest -q` -> 74 passed (1 new regression
+  test for the ambiguous-name-drop behavior). `ruff check .` -> clean.
+- Approx LLM $ spent this phase: ~$0.02 (1 real `claude-haiku-4-5` call each
+  from the builder's and the checker's end-to-end done-check runs).
