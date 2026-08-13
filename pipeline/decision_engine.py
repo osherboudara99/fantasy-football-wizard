@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import polars as pl
 from dotenv import load_dotenv
@@ -21,6 +22,7 @@ from dotenv import load_dotenv
 from llm.interface import Recommendation, run_llm
 from pipeline.context_builder import build_context
 from pipeline.entity_extraction import extract_players, extract_week
+from retrieval.news_retriever import retrieve_news
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 PROCESSED_DIR = DATA_DIR / "processed"
@@ -120,15 +122,19 @@ def decide(
     players: list[str] | None = None,
     week: int | None = None,
     tables: dict[str, pl.DataFrame] | None = None,
+    news_fn: Callable[[str | None, str], list[str]] | None = None,
 ) -> Decision:
     """Answer a two-player start/sit question end to end.
 
     `players`/`week` override what the question text says; `tables` lets tests
-    inject fixture DataFrames instead of reading data/processed/.
+    inject fixture DataFrames instead of reading data/processed/. `news_fn`
+    defaults to the real Chroma-backed retriever (README §6.2); tests that don't
+    care about news can pass a stub to stay hermetic.
     """
     resolved_players = resolve_players(question, players)
     resolved_week = resolve_week(question, week)
-    context = build_context(resolved_players, resolved_week, tables=tables)
+    news_fn = news_fn if news_fn is not None else retrieve_news
+    context = build_context(resolved_players, resolved_week, tables=tables, news_fn=news_fn)
     recommendation = run_llm(context, question)
     _check_recommendation(recommendation, resolved_players)
     return Decision(

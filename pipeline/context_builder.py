@@ -2,12 +2,14 @@
 data (README §7). Deliberately outside the LLM: deterministic, testable, and
 debuggable - the LLM only ever reasons over the string this produces.
 
-News retrieval (RAG) is wired in during Phase 6; until then the comparison
-omits the "Recent news" bullet shown in README §7's example.
+The "Recent news" bullet (README §7's example) only appears when a `news_fn`
+is passed in - callers that don't care about news (or are running before the
+Phase 6 embeddings index exists) get the pre-Phase-6 output unchanged.
 """
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable
 
 import polars as pl
 
@@ -55,8 +57,13 @@ def _format_injury(injuries: pl.DataFrame, name: str, player_id: str | None) -> 
     return f"{status} -> {practice}" if practice else status
 
 
-def _format_player(name: str, week: int, tables: dict[str, pl.DataFrame]) -> str:
-    """One player's block: name header, last-3-week avg, projection, injury status."""
+def _format_player(
+    name: str,
+    week: int,
+    tables: dict[str, pl.DataFrame],
+    news_fn: Callable[[str | None, str], list[str]] | None,
+) -> str:
+    """One player's block: name header, last-3-week avg, projection, injury status, news."""
     stats = tables["player_stats"].filter(
         (pl.col("player_name") == name) & (pl.col("week") == week)
     )
@@ -73,16 +80,28 @@ def _format_player(name: str, week: int, tables: dict[str, pl.DataFrame]) -> str
     if projected is not None:
         lines.append(f"- Projected points: {projected:.1f}")
     lines.append(f"- Injury: {_format_injury(tables['injuries'], name, player_id)}")
+
+    if news_fn is not None:
+        news_items = news_fn(player_id, name)
+        if news_items:
+            lines.append("- Recent news:")
+            lines.extend(f'  - "{item}"' for item in news_items)
     return "\n".join(lines)
 
 
 def build_context(
-    players: list[str], week: int, tables: dict[str, pl.DataFrame] | None = None
+    players: list[str],
+    week: int,
+    tables: dict[str, pl.DataFrame] | None = None,
+    news_fn: Callable[[str | None, str], list[str]] | None = None,
 ) -> str:
     """Build the §7 PLAYER COMPARISON block for the given players and week.
 
     `tables` lets tests inject fixture DataFrames instead of reading data/processed/.
+    `news_fn(player_id, player_name) -> list[str]` adds a "Recent news" bullet per
+    player when it returns any snippets; omitted (the default) or an empty return
+    skips the bullet entirely.
     """
     tables = tables if tables is not None else _load_processed()
-    blocks = [_format_player(name, week, tables) for name in players]
+    blocks = [_format_player(name, week, tables, news_fn) for name in players]
     return "PLAYER COMPARISON\n\n" + "\n\n".join(blocks)
