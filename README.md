@@ -7,7 +7,7 @@
 
 ```powershell
 uv venv --python 3.11
-uv sync
+uv sync --extra refresh --extra dev
 ```
 
 3. Activate the environment:
@@ -17,7 +17,7 @@ uv sync
 ```
 
 Notes:
-- Dependencies are defined in `pyproject.toml`; `uv sync` regenerates `uv.lock`.
+- Dependencies are defined in `pyproject.toml`; `uv sync` regenerates `uv.lock`. The base `dependencies` list (Phase 7 on) is deliberately just what the FastAPI request path needs — no `nflreadpy`/`pandas`/`sentence-transformers`/torch, per §13's "no torch in the API image." Local dev needs the `refresh` extra too (data/news/embeddings scripts + their tests) — `dev` adds `pytest`/`ruff`/notebook tooling. The API's Docker image installs the base group only.
 - Copy `.env.example` to `.env` and fill in `ANTHROPIC_API_KEY` (optionally `ANTHROPIC_MODEL`) — never commit `.env`.
 
 ---

@@ -61,9 +61,13 @@ Canonical free sources were vetted July 2026 and are tabled in README section 1.
 Environment (uv-managed, `pyproject.toml` is the dependency source of truth):
 ```powershell
 uv venv --python 3.11
-uv sync
+uv sync --extra refresh --extra dev   # local dev: everything, including refresh scripts + tests
 .\.venv\Scripts\Activate.ps1
 ```
+Bare `uv sync` (no extras) installs only what the FastAPI request path needs - no
+`nflreadpy`/`pandas`/`sentence-transformers`/torch. That's what `Dockerfile` uses
+for the API image (README §13's "no torch in the API image"); it's too lean to run
+`scripts/refresh_*.py`, `embeddings/build_embeddings.py`, or the full test suite.
 
 Run:
 ```powershell

@@ -4,14 +4,12 @@ version = "0.1.0"
 description = "LLM-powered fantasy football decision assistant."
 readme = "README.md"
 requires-python = ">=3.10"
+# Kept lean on purpose: this is exactly what the FastAPI request path needs
+# (api/main.py -> pipeline/ -> llm/, retrieval/). Cloud Run cold-start and image
+# size depend on nothing heavier landing here - see the "refresh" extra below
+# and README §13's "no torch in the API image" constraint.
 dependencies = [
-  "pandas",
   "polars",
-  "pyarrow",
-  "nflreadpy",
-  "requests",
-  "beautifulsoup4",
-  "sentence-transformers",
   "chromadb",
   "fastapi",
   "uvicorn",
@@ -21,6 +19,19 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Only scripts/refresh_stats.py, scripts/refresh_news.py, and
+# embeddings/build_embeddings.py need these - the data/news/embeddings refresh
+# jobs, never the API request path. sentence-transformers (torch) in particular
+# must stay out of the API image (README §13); local dev needs this extra to
+# run the refresh scripts and their tests.
+refresh = [
+  "pandas",
+  "pyarrow",
+  "nflreadpy",
+  "requests",
+  "beautifulsoup4",
+  "sentence-transformers",
+]
 dev = [
   "ipykernel",
   "jupyter",
