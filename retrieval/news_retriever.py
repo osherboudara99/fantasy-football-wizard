@@ -1,32 +1,23 @@
 """Retrieve recent, player-tagged news snippets from Chroma (README §6.2).
 
-Metadata filtering (player_id + recency) narrows the candidate set before
-semantic similarity ranks the top-k - keeps retrieval both relevant and fresh.
+Filters by metadata only (player_id + recency), then sorts by recency -
+deliberately no query-time embedding: the candidate set is already scoped to
+one player by the player_id filter, so a semantic similarity pass over it adds
+little, and computing one would need sentence-transformers (torch) inside the
+API request path. README §13 requires the opposite - embedding only happens in
+the refresh job (embeddings/build_embeddings.py), never here.
 """
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable
 
 import chromadb
-from sentence_transformers import SentenceTransformer
 
 CHROMA_DIR = Path(__file__).resolve().parent.parent / "embeddings" / "chroma_db"
 COLLECTION_NAME = "news"
 DEFAULT_K = 3
 MAX_AGE_DAYS = 7
-EMBEDDING_MODEL = "all-MiniLM-L6-v2"
-
-_model: SentenceTransformer | None = None
-
-
-def _default_embed_query(text: str) -> list[float]:
-    """Lazily load the shared sentence-transformers model, then embed one query string."""
-    global _model
-    if _model is None:
-        _model = SentenceTransformer(EMBEDDING_MODEL)
-    return _model.encode([text]).tolist()[0]
 
 
 def _default_collection():
@@ -40,15 +31,14 @@ def retrieve_news(
     k: int = DEFAULT_K,
     max_age_days: int = MAX_AGE_DAYS,
     collection=None,
-    embed_query: Callable[[str], list[float]] | None = None,
 ) -> list[str]:
-    """Top-k recent news headlines/snippets for one player, most relevant first.
+    """Top-k most recent news snippets for one player.
 
-    `collection`/`embed_query` are injectable so tests can use a fixture Chroma
-    collection and a stub encoder instead of the real on-disk index/model.
-    Returns [] (never raises) when nothing has been embedded yet or the player
-    has no recent tagged news - Phase 6 is additive, so a build that hasn't run
-    the embeddings refresh must still produce a working (just news-free) context.
+    `player_name` isn't used in the query itself - it's kept so this matches
+    the `news_fn(player_id, player_name)` contract the context builder calls.
+    `collection` is injectable so tests can use a fixture Chroma collection
+    instead of the real on-disk index. Returns [] (never raises) when nothing
+    has been embedded yet or the player has no recent tagged news.
     """
     if not player_id:
         return []
@@ -57,13 +47,14 @@ def retrieve_news(
     if collection.count() == 0:
         return []
 
-    embed_query = embed_query if embed_query is not None else _default_embed_query
     cutoff_ts = int((datetime.now(timezone.utc) - timedelta(days=max_age_days)).timestamp())
-
-    result = collection.query(
-        query_embeddings=[embed_query(f"recent news about {player_name}")],
-        n_results=k,
+    result = collection.get(
         where={"$and": [{"player_id": player_id}, {"published_ts": {"$gte": cutoff_ts}}]},
+        include=["documents", "metadatas"],
     )
-    documents = result.get("documents") or [[]]
-    return documents[0] if documents else []
+    documents = result.get("documents") or []
+    metadatas = result.get("metadatas") or []
+    ranked = sorted(
+        zip(documents, metadatas), key=lambda pair: pair[1].get("published_ts", 0), reverse=True
+    )
+    return [document for document, _ in ranked[:k]]
