@@ -1,0 +1,29 @@
+# Only api/, pipeline/, llm/, retrieval/, pyproject.toml, and uv.lock are
+# COPYed into the image (see Dockerfile) - everything below is either
+# irrelevant to the API image or must never end up baked into it.
+
+.git/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Local data artifacts - Cloud Run is stateless, these load from GCS at
+# runtime (README §13), never bake into the image.
+data/
+embeddings/chroma_db/
+
+# Never let a secret land in an image layer.
+.env
+
+# Not needed by the API image.
+scripts/
+embeddings/
+frontend/
+tests/
+notebooks/
+*.ipynb
+AGENT_GOALS.md
+PROGRESS_LOG.md
+README.md
