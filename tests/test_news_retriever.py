@@ -4,7 +4,7 @@ from uuid import uuid4
 import chromadb
 import pytest
 
-from retrieval.news_retriever import retrieve_news
+from retrieval.news_retriever import NewsItem, retrieve_news
 
 
 def _stub_embed(text: str) -> list[float]:
@@ -26,7 +26,7 @@ def collection():
     return client.get_or_create_collection(f"news-test-{uuid4().hex}")
 
 
-def _add(collection, doc_id, text, player_id, days_ago):
+def _add(collection, doc_id, text, player_id, days_ago, title="", link="", source=""):
     published_at = datetime.now(timezone.utc) - timedelta(days=days_ago)
     collection.upsert(
         ids=[doc_id],
@@ -35,6 +35,10 @@ def _add(collection, doc_id, text, player_id, days_ago):
         metadatas=[{
             "player_id": player_id,
             "player_name": "Jordan Love",
+            "title": title,
+            "link": link,
+            "source": source,
+            "published_at": published_at.isoformat(),
             "published_ts": int(published_at.timestamp()),
         }],
     )
@@ -49,11 +53,15 @@ def test_retrieve_news_returns_empty_list_when_collection_is_empty(collection):
 
 
 def test_retrieve_news_filters_to_the_requested_player(collection):
-    _add(collection, "a", "Jordan Love news", "00-1", days_ago=1)
+    _add(collection, "a", "Jordan Love news", "00-1", days_ago=1,
+         title="Love news", link="https://example.com/a", source="ESPN")
     _add(collection, "b", "Jared Goff news", "00-2", days_ago=1)
 
-    results = retrieve_news("00-1", "Jordan Love", collection=collection)
-    assert results == ["Jordan Love news"]
+    [item] = retrieve_news("00-1", "Jordan Love", collection=collection)
+    assert item.snippet == "Jordan Love news"
+    assert item.title == "Love news"
+    assert item.link == "https://example.com/a"
+    assert item.source == "ESPN"
 
 
 def test_retrieve_news_filters_out_stale_articles(collection):
@@ -61,7 +69,7 @@ def test_retrieve_news_filters_out_stale_articles(collection):
     _add(collection, "b", "Jordan Love stale news", "00-1", days_ago=30)
 
     results = retrieve_news("00-1", "Jordan Love", max_age_days=7, collection=collection)
-    assert results == ["Jordan Love fresh news"]
+    assert [item.snippet for item in results] == ["Jordan Love fresh news"]
 
 
 def test_retrieve_news_orders_most_recent_first(collection):
@@ -70,7 +78,9 @@ def test_retrieve_news_orders_most_recent_first(collection):
     _add(collection, "c", "Jordan Love one day ago", "00-1", days_ago=1)
 
     results = retrieve_news("00-1", "Jordan Love", k=3, collection=collection)
-    assert results == ["Jordan Love today", "Jordan Love one day ago", "Jordan Love three days ago"]
+    assert [item.snippet for item in results] == [
+        "Jordan Love today", "Jordan Love one day ago", "Jordan Love three days ago"
+    ]
 
 
 def test_retrieve_news_respects_k_keeping_the_most_recent(collection):
@@ -78,4 +88,4 @@ def test_retrieve_news_respects_k_keeping_the_most_recent(collection):
         _add(collection, f"a{days_ago}", f"Jordan Love news {days_ago}d ago", "00-1", days_ago=days_ago)
 
     results = retrieve_news("00-1", "Jordan Love", k=2, collection=collection)
-    assert results == ["Jordan Love news 0d ago", "Jordan Love news 1d ago"]
+    assert [item.snippet for item in results] == ["Jordan Love news 0d ago", "Jordan Love news 1d ago"]

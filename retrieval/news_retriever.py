@@ -1,4 +1,4 @@
-"""Retrieve recent, player-tagged news snippets from Chroma (README §6.2).
+"""Retrieve recent, player-tagged news items from Chroma (README §6.2).
 
 Filters by metadata only (player_id + recency), then sorts by recency -
 deliberately no query-time embedding: the candidate set is already scoped to
@@ -9,6 +9,7 @@ the refresh job (embeddings/build_embeddings.py), never here.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -18,6 +19,17 @@ CHROMA_DIR = Path(__file__).resolve().parent.parent / "embeddings" / "chroma_db"
 COLLECTION_NAME = "news"
 DEFAULT_K = 3
 MAX_AGE_DAYS = 7
+
+
+@dataclass(frozen=True)
+class NewsItem:
+    """One retrieved news article - everything the chat UI needs to cite it."""
+
+    title: str
+    snippet: str
+    link: str
+    source: str
+    published_at: str
 
 
 def _default_collection():
@@ -31,8 +43,8 @@ def retrieve_news(
     k: int = DEFAULT_K,
     max_age_days: int = MAX_AGE_DAYS,
     collection=None,
-) -> list[str]:
-    """Top-k most recent news snippets for one player.
+) -> list[NewsItem]:
+    """Top-k most recent news items for one player, newest first.
 
     `player_name` isn't used in the query itself - it's kept so this matches
     the `news_fn(player_id, player_name)` contract the context builder calls.
@@ -57,4 +69,13 @@ def retrieve_news(
     ranked = sorted(
         zip(documents, metadatas), key=lambda pair: pair[1].get("published_ts", 0), reverse=True
     )
-    return [document for document, _ in ranked[:k]]
+    return [
+        NewsItem(
+            title=metadata.get("title", ""),
+            snippet=document,
+            link=metadata.get("link", ""),
+            source=metadata.get("source", ""),
+            published_at=metadata.get("published_at", ""),
+        )
+        for document, metadata in ranked[:k]
+    ]
