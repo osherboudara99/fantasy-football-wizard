@@ -1,9 +1,9 @@
-"""FastAPI layer over the decision pipeline (README §14).
+"""FastAPI layer over the chat pipeline (README §14, chat design spec).
 
 Run locally:
     uvicorn api.main:app --reload
 
-The API owns no logic of its own: it validates input, calls `decide()`, and maps
+The API owns no logic of its own: it validates input, calls `chat()`, and maps
 pipeline errors onto status codes. Everything else - data access, context
 assembly, the Anthropic key - stays server-side in the pipeline modules.
 """
@@ -11,31 +11,30 @@ from __future__ import annotations
 
 import os
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, StringConstraints
 
+from pipeline.chat_engine import NoPlayersFoundError, chat
 from pipeline.context_builder import PlayerNotFoundError
-from pipeline.decision_engine import (
-    REQUIRED_PLAYERS,
-    DataUnavailableError,
-    DecisionError,
-    decide,
-)
+from pipeline.decision_engine import DataUnavailableError, DecisionError
 from pipeline.entity_extraction import known_player_names
 
 # The frontend is a separate origin in dev (Vite on 5173) and in prod (Cloudflare
 # Pages), so the allowed origins have to be configurable per deployment.
 DEFAULT_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
 
-# Every request that reaches decide() costs a paid LLM call whose price scales with
-# the input, and `question` is passed straight into the prompt. Cap both the question
-# and each name so a caller can't turn one request into a six-figure-token bill.
+# Every request that reaches chat() costs a paid LLM call whose price scales with
+# the input. Cap the message, each history turn, each player name, and the number
+# of mentions/history turns so a caller can't turn one request into a six-figure-
+# token bill.
 MAX_QUESTION_LENGTH = 500
 MAX_PLAYER_NAME_LENGTH = 100
+MAX_MENTIONED_PLAYERS = 10
+MAX_HISTORY_TURNS = 20
 
 load_dotenv()
 
@@ -52,32 +51,45 @@ app.add_middleware(
 )
 
 
-class RecommendationRequest(BaseModel):
-    players: list[Annotated[str, StringConstraints(max_length=MAX_PLAYER_NAME_LENGTH)]] = Field(
-        min_length=REQUIRED_PLAYERS,
-        max_length=REQUIRED_PLAYERS,
-        description="The two players to compare",
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: Annotated[str, StringConstraints(max_length=MAX_QUESTION_LENGTH)]
+
+
+class ChatRequest(BaseModel):
+    message: Annotated[str, StringConstraints(max_length=MAX_QUESTION_LENGTH)]
+    mentioned_players: list[Annotated[str, StringConstraints(max_length=MAX_PLAYER_NAME_LENGTH)]] = (
+        Field(default_factory=list, max_length=MAX_MENTIONED_PLAYERS)
     )
     week: int | None = Field(
         default=None, description="Defaults to the week the processed data describes"
     )
-    question: str | None = Field(
-        default=None,
-        max_length=MAX_QUESTION_LENGTH,
-        description="Optional free-text question",
-    )
+    history: list[ChatTurn] = Field(default_factory=list, max_length=MAX_HISTORY_TURNS)
 
 
-class RecommendationResponse(BaseModel):
+class SourceItem(BaseModel):
+    title: str
+    link: str
+    source: str
+    published_at: str
+
+
+class RecommendationPayload(BaseModel):
     start: str
     bench: str
     confidence: float
     key_factors: list[str]
     risk_factors: list[str]
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    sources: list[SourceItem]
+    players_discussed: list[str]
+    recommendation: RecommendationPayload | None
     week: int
-    players: list[str]
     # The assembled context travels with the answer so the UI can show what the
-    # recommendation was actually based on (README §10's debug view).
+    # answer was actually based on (README §10's debug view).
     context: str
 
 
@@ -89,18 +101,22 @@ def health() -> dict[str, str]:
 
 @app.get("/players")
 def players() -> list[str]:
-    """Every player the processed data knows about, for the frontend's picker."""
+    """Every player the processed data knows about, for the frontend's @-mention search."""
     return known_player_names()
 
 
-@app.post("/recommendation", response_model=RecommendationResponse)
-def recommendation(request: RecommendationRequest) -> RecommendationResponse:
-    """Run a two-player start/sit decision end to end."""
-    question = request.question or (
-        f"Who should I start, {request.players[0]} or {request.players[1]}?"
-    )
+@app.post("/chat", response_model=ChatResponse)
+def chat_endpoint(request: ChatRequest) -> ChatResponse:
+    """Answer any fantasy-football question about the mentioned/named players."""
     try:
-        decision = decide(question, players=request.players, week=request.week)
+        result = chat(
+            request.message,
+            mentioned_players=request.mentioned_players,
+            week=request.week,
+            history=[turn.model_dump() for turn in request.history],
+        )
+    except NoPlayersFoundError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except PlayerNotFoundError as exc:
         # Unknown player or a week the data doesn't cover: the caller's input is
         # wrong, not the server - 404 rather than a 500 stack trace.
@@ -114,14 +130,18 @@ def recommendation(request: RecommendationRequest) -> RecommendationResponse:
     except DecisionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    rec = decision.recommendation
-    return RecommendationResponse(
-        start=rec.start,
-        bench=rec.bench,
-        confidence=rec.confidence,
-        key_factors=rec.key_factors,
-        risk_factors=rec.risk_factors,
-        week=decision.week,
-        players=decision.players,
-        context=decision.context,
+    return ChatResponse(
+        answer=result.answer,
+        sources=[
+            SourceItem(title=s.title, link=s.link, source=s.source, published_at=s.published_at)
+            for s in result.sources
+        ],
+        players_discussed=result.players_discussed,
+        recommendation=(
+            RecommendationPayload(**result.recommendation.model_dump())
+            if result.recommendation is not None
+            else None
+        ),
+        week=result.week,
+        context=result.context,
     )
