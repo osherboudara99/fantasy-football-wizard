@@ -13,11 +13,9 @@ function ConfidenceBar({ confidence }) {
   )
 }
 
-export default function ResultCard({ result }) {
-  const { start, bench, confidence, key_factors, risk_factors, week, context } = result
-
+export default function DecisionCard({ start, bench, confidence, key_factors, risk_factors }) {
   return (
-    <div className="result-card">
+    <div className="decision-card">
       <div className="verdict">
         <div className="verdict-start">
           <span className="verdict-tag">START</span>
@@ -30,8 +28,6 @@ export default function ResultCard({ result }) {
       </div>
 
       <ConfidenceBar confidence={confidence} />
-
-      <p className="week-line">Week {week}</p>
 
       {key_factors?.length > 0 && (
         <div className="factors">
@@ -54,11 +50,6 @@ export default function ResultCard({ result }) {
           </ul>
         </div>
       )}
-
-      <details className="debug-view">
-        <summary>Show injected context</summary>
-        <pre>{context}</pre>
-      </details>
     </div>
   )
 }
