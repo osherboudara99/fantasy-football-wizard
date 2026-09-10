@@ -47,7 +47,7 @@ question is a binary start/bench call.
 Request:
 {
   "message": str,                    # free-text question
-  "mentioned_player_ids": [str],     # from @-mention autocomplete, may be []
+  "mentioned_players": [str],        # exact names from the @-mention autocomplete (GET /players), may be []
   "week": int | null,                # defaults to target_week()
   "history": [{"role": "user"|"assistant", "content": str}]  # prior turns, frontend-held
 }
@@ -64,15 +64,18 @@ Response:
 }
 ```
 
-**Player resolution** (`pipeline/chat_engine.py`, new): `mentioned_player_ids`
-resolve directly to names via the existing `player_stats` table (reliable, no
-fuzzy matching). Any player named in free text but *not* `@`-mentioned still
-goes through the existing `pipeline.entity_extraction.extract_players` as a
-fallback, so typing a name without mentioning it still works. The combined,
-de-duplicated player list can be any length ≥ 1 (today's `REQUIRED_PLAYERS ==
-2` constraint is dropped for chat — start/sit-style questions still expect 2,
-but a "how many points will X score" question expects 1, and a 3-way flex
-question is now representable too).
+**Player resolution** (`pipeline/chat_engine.py`, new): `mentioned_players`
+are exact names already validated by the `@`-mention autocomplete (sourced
+from `GET /players`, the same `known_player_names()` list used everywhere
+else) — no player_id needed at the API boundary, consistent with how
+`RecommendationRequest.players`/`extract_players` already treat names as the
+canonical identifier. Any player named in free text but *not* `@`-mentioned
+still goes through the existing `pipeline.entity_extraction.extract_players`
+as a fallback, so typing a name without mentioning it still works. The
+combined, de-duplicated (case-insensitive) player list can be any length ≥ 1
+(today's `REQUIRED_PLAYERS == 2` constraint is dropped for chat — start/sit-
+style questions still expect 2, but a "how many points will X score"
+question expects 1, and a 3-way flex question is now representable too).
 
 **Context building**: `pipeline.context_builder.build_context()` already loops
 over an arbitrary `players: list[str]` — no change needed there beyond
@@ -120,8 +123,8 @@ Frontend-only addition: typing `@` in the chat textarea opens an autocomplete
 dropdown filtered client-side against `GET /players` (already returns the
 full name list; fetched once on load and cached in memory — the list is small
 enough that no server-side search endpoint is needed). Selecting an entry
-inserts a visible token in the message text and adds the player to
-`mentioned_player_ids` sent with the request.
+inserts a visible token in the message text and adds the player's exact name
+to `mentioned_players` sent with the request.
 
 ### Frontend
 
@@ -135,7 +138,7 @@ Replace `frontend/`'s picker form with a chat view:
 - A small week selector stays above the input (defaults to
   `target_week()`-equivalent, overridable).
 - Input box: textarea with `@`-mention autocomplete; submit sends `message` +
-  current `mentioned_player_ids` + `history` (the full prior transcript held
+  current `mentioned_players` + `history` (the full prior transcript held
   in React state) + `week`.
 - No persistence across page reloads (frontend-held history only, per the
   approved design decisions) — refreshing starts a new conversation.
