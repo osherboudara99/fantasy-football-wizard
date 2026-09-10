@@ -1,18 +1,16 @@
-import { useEffect, useState } from 'react'
-import { fetchPlayers, fetchRecommendation } from './api'
-import ResultCard from './ResultCard'
+import { useEffect, useRef, useState } from 'react'
+import { fetchChat, fetchPlayers } from './api'
+import ChatInput from './ChatInput'
+import MessageBubble from './MessageBubble'
 import './App.css'
 
 function App() {
   const [players, setPlayers] = useState([])
   const [playersError, setPlayersError] = useState(null)
-  const [playerA, setPlayerA] = useState('')
-  const [playerB, setPlayerB] = useState('')
   const [week, setWeek] = useState('')
-  const [question, setQuestion] = useState('')
-  const [result, setResult] = useState(null)
+  const [messages, setMessages] = useState([])
   const [submitting, setSubmitting] = useState(false)
-  const [submitError, setSubmitError] = useState(null)
+  const scrollRef = useRef(null)
 
   useEffect(() => {
     fetchPlayers()
@@ -20,24 +18,33 @@ function App() {
       .catch((err) => setPlayersError(err.message))
   }, [])
 
-  const canSubmit = playerA && playerB && playerA !== playerB && !submitting
+  useEffect(() => {
+    scrollRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
 
-  async function handleSubmit(event) {
-    event.preventDefault()
-    if (!canSubmit) return
-
+  async function handleSend(message, mentionedPlayers) {
+    const history = messages.map(({ role, content }) => ({ role, content }))
+    setMessages((prev) => [...prev, { role: 'user', content: message }])
     setSubmitting(true)
-    setSubmitError(null)
-    setResult(null)
     try {
-      const recommendation = await fetchRecommendation({
-        players: [playerA, playerB],
+      const response = await fetchChat({
+        message,
+        mentionedPlayers,
         week: week ? Number(week) : null,
-        question: question.trim() || null,
+        history,
       })
-      setResult(recommendation)
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: response.answer,
+          sources: response.sources,
+          recommendation: response.recommendation,
+          context: response.context,
+        },
+      ])
     } catch (err) {
-      setSubmitError(err.message)
+      setMessages((prev) => [...prev, { role: 'assistant', content: err.message, error: true }])
     } finally {
       setSubmitting(false)
     }
@@ -47,76 +54,23 @@ function App() {
     <div className="app">
       <header>
         <h1>Fantasy Football Wizard</h1>
-        <p className="subtitle">Start/sit decisions, explained.</p>
-      </header>
-
-      {playersError && (
-        <p className="error">Couldn't load players: {playersError}</p>
-      )}
-
-      <form onSubmit={handleSubmit}>
-        <div className="player-row">
-          <label>
-            Player A
-            <select value={playerA} onChange={(e) => setPlayerA(e.target.value)}>
-              <option value="">Select a player</option>
-              {players.map((name) => (
-                <option key={name} value={name} disabled={name === playerB}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <span className="vs">vs</span>
-
-          <label>
-            Player B
-            <select value={playerB} onChange={(e) => setPlayerB(e.target.value)}>
-              <option value="">Select a player</option>
-              {players.map((name) => (
-                <option key={name} value={name} disabled={name === playerA}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        <label>
-          Question <span className="optional">(optional)</span>
-          <input
-            type="text"
-            value={question}
-            maxLength={500}
-            placeholder={
-              playerA && playerB
-                ? `Who should I start, ${playerA} or ${playerB}?`
-                : 'Who should I start?'
-            }
-            onChange={(e) => setQuestion(e.target.value)}
-          />
-        </label>
-
+        <p className="subtitle">Ask about start/sit, trades, or any player.</p>
         <label className="week-label">
           Week <span className="optional">(optional, defaults to upcoming)</span>
-          <input
-            type="number"
-            min="1"
-            max="22"
-            value={week}
-            onChange={(e) => setWeek(e.target.value)}
-          />
+          <input type="number" min="1" max="22" value={week} onChange={(e) => setWeek(e.target.value)} />
         </label>
+      </header>
 
-        <button type="submit" disabled={!canSubmit}>
-          {submitting ? 'Thinking…' : 'Get recommendation'}
-        </button>
-      </form>
+      {playersError && <p className="error">Couldn't load players: {playersError}</p>}
 
-      {submitError && <p className="error">{submitError}</p>}
+      <div className="message-list">
+        {messages.map((message, i) => (
+          <MessageBubble key={i} {...message} />
+        ))}
+        <div ref={scrollRef} />
+      </div>
 
-      {result && <ResultCard result={result} />}
+      <ChatInput players={players} onSend={handleSend} disabled={submitting} />
     </div>
   )
 }
