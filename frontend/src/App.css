@@ -1,12 +1,15 @@
 .app {
   max-width: 640px;
   margin: 0 auto;
-  padding: 32px 20px 64px;
+  padding: 24px 20px 16px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 header {
   text-align: center;
-  margin-bottom: 32px;
+  margin-bottom: 20px;
 }
 
 header h1 {
@@ -16,12 +19,6 @@ header h1 {
 
 .subtitle {
   color: var(--text);
-}
-
-form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
 }
 
 label {
@@ -38,58 +35,25 @@ label {
   color: var(--text);
 }
 
-select,
-input[type='text'],
 input[type='number'] {
   font: inherit;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--field-bg);
   color: var(--text-h);
 }
 
-select:focus,
-input:focus {
+input:focus,
+textarea:focus,
+button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
-.player-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-}
-
-.player-row label {
-  flex: 1;
-  min-width: 0;
-}
-
-.vs {
-  padding-bottom: 10px;
-  color: var(--text);
-  font-weight: 600;
-}
-
 .week-label {
-  max-width: 240px;
-}
-
-button[type='submit'] {
-  font: inherit;
-  font-weight: 600;
-  padding: 12px;
-  border: none;
-  border-radius: 8px;
-  background: var(--accent);
-  color: white;
-  cursor: pointer;
-}
-
-button[type='submit']:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  max-width: 220px;
+  margin: 12px auto 0;
 }
 
 .error {
@@ -97,11 +61,52 @@ button[type='submit']:disabled {
   font-size: 14px;
 }
 
-.result-card {
-  margin-top: 32px;
-  padding: 24px;
+/* Message list */
+
+.message-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 8px 0 20px;
+  overflow-y: auto;
+}
+
+.message {
+  max-width: 85%;
+  padding: 14px 16px;
+  border-radius: 14px;
+  line-height: 1.5;
+}
+
+.message-content {
+  white-space: pre-wrap;
+}
+
+.message-user {
+  align-self: flex-end;
+  background: var(--accent-bg);
+  color: var(--text-h);
+}
+
+.message-assistant {
+  align-self: flex-start;
+  background: var(--field-bg);
   border: 1px solid var(--border);
-  border-radius: 12px;
+}
+
+.message-error {
+  border: 1px solid var(--danger);
+  color: var(--danger);
+}
+
+/* Decision card - nested inside an assistant bubble, so it uses a divider
+   rather than its own bordered box (avoids a box-in-a-box look). */
+
+.decision-card {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
 }
 
 .verdict {
@@ -142,7 +147,7 @@ button[type='submit']:disabled {
 }
 
 .confidence {
-  margin-top: 20px;
+  margin-top: 16px;
 }
 
 .confidence-label {
@@ -157,7 +162,7 @@ button[type='submit']:disabled {
 .confidence-track {
   height: 8px;
   border-radius: 4px;
-  background: var(--field-bg);
+  background: var(--bg);
   overflow: hidden;
 }
 
@@ -167,14 +172,8 @@ button[type='submit']:disabled {
   border-radius: 4px;
 }
 
-.week-line {
-  margin-top: 12px;
-  font-size: 13px;
-  color: var(--text);
-}
-
 .factors {
-  margin-top: 20px;
+  margin-top: 16px;
 }
 
 .factors h3 {
@@ -191,8 +190,39 @@ button[type='submit']:disabled {
   color: var(--danger);
 }
 
+/* Sources */
+
+.source-list {
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.source-list summary {
+  cursor: pointer;
+  color: var(--text);
+}
+
+.source-list ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.source-list li {
+  margin-bottom: 4px;
+}
+
+.source-list a {
+  color: var(--accent);
+}
+
+.source-meta {
+  color: var(--text);
+}
+
+/* Debug view */
+
 .debug-view {
-  margin-top: 20px;
+  margin-top: 12px;
   font-size: 13px;
 }
 
@@ -204,11 +234,89 @@ button[type='submit']:disabled {
 .debug-view pre {
   margin-top: 8px;
   padding: 12px;
-  background: var(--field-bg);
+  background: var(--bg);
   border-radius: 8px;
   white-space: pre-wrap;
   font-family: var(--mono);
   font-size: 12px;
   max-height: 400px;
   overflow-y: auto;
+}
+
+/* Chat input */
+
+.chat-input {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  padding: 12px 0;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+}
+
+.chat-input textarea {
+  flex: 1;
+  font: inherit;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--field-bg);
+  color: var(--text-h);
+  resize: none;
+  min-height: 44px;
+  max-height: 160px;
+}
+
+.chat-input button[type='submit'] {
+  font: inherit;
+  font-weight: 600;
+  padding: 10px 18px;
+  border: none;
+  border-radius: 10px;
+  background: var(--accent);
+  color: white;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chat-input button[type='submit']:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.mention-suggestions {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  margin: 0 0 8px;
+  padding: 6px;
+  list-style: none;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  max-height: 220px;
+  overflow-y: auto;
+  z-index: 10;
+}
+
+.mention-suggestions li button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.mention-suggestions li button:hover,
+.mention-suggestions li button:focus-visible {
+  background: var(--field-bg);
 }

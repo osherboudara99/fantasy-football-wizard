@@ -19,7 +19,8 @@ function App() {
   }, [])
 
   useEffect(() => {
-    scrollRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    scrollRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth' })
   }, [messages])
 
   async function handleSend(message, mentionedPlayers) {
