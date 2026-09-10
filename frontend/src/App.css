@@ -8,30 +8,27 @@
 }
 
 header {
-  text-align: center;
-  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 16px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 5;
 }
 
-header h1 {
-  font-size: 32px;
-  margin: 0 0 4px;
+.header-title h1 {
+  font-size: 22px;
+  margin: 0;
 }
 
 .subtitle {
-  color: var(--text);
-}
-
-label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-h);
-}
-
-.optional {
-  font-weight: 400;
+  margin-top: 2px;
+  font-size: 13px;
   color: var(--text);
 }
 
@@ -52,8 +49,17 @@ button:focus-visible {
 }
 
 .week-label {
-  max-width: 220px;
-  margin: 12px auto 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-h);
+  flex-shrink: 0;
+}
+
+.week-label input {
+  width: 76px;
 }
 
 .error {
@@ -65,6 +71,10 @@ button:focus-visible {
 
 .message-list {
   flex: 1;
+  /* Without this, a flex child's default min-height (content-based) prevents
+     it from ever shrinking below its content, so overflow-y: auto never
+     kicks in - the whole page grows and scrolls instead of just this list. */
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -80,19 +90,21 @@ button:focus-visible {
 }
 
 .message-content {
+  color: var(--text-h);
   white-space: pre-wrap;
 }
 
 .message-user {
   align-self: flex-end;
   background: var(--accent-bg);
-  color: var(--text-h);
+  border-bottom-right-radius: 4px;
 }
 
 .message-assistant {
   align-self: flex-start;
   background: var(--field-bg);
   border: 1px solid var(--border);
+  border-bottom-left-radius: 4px;
 }
 
 .message-error {

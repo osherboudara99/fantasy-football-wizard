@@ -54,11 +54,20 @@ function App() {
   return (
     <div className="app">
       <header>
-        <h1>Fantasy Football Wizard</h1>
-        <p className="subtitle">Ask about start/sit, trades, or any player.</p>
-        <label className="week-label">
-          Week <span className="optional">(optional, defaults to upcoming)</span>
-          <input type="number" min="1" max="22" value={week} onChange={(e) => setWeek(e.target.value)} />
+        <div className="header-title">
+          <h1>Fantasy Football Wizard</h1>
+          <p className="subtitle">Ask about start/sit, trades, or any player.</p>
+        </div>
+        <label className="week-label" title="Optional — defaults to the upcoming week">
+          Week
+          <input
+            type="number"
+            min="1"
+            max="22"
+            placeholder="upcoming"
+            value={week}
+            onChange={(e) => setWeek(e.target.value)}
+          />
         </label>
       </header>
 
