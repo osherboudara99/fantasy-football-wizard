@@ -3,6 +3,7 @@ import pytest
 
 from pipeline.context_builder import PlayerNotFoundError, build_context
 from pipeline.entity_extraction import extract_players, extract_week, known_player_names
+from retrieval.news_retriever import NewsItem
 
 
 def _fixture_tables():
@@ -111,7 +112,15 @@ def test_build_context_omits_news_bullet_when_news_fn_returns_nothing():
 
 def test_build_context_adds_a_news_bullet_per_snippet_when_news_fn_returns_some():
     def news_fn(player_id, player_name):
-        return ["Packers plan to stay aggressive..."] if player_name == "Jordan Love" else []
+        if player_name != "Jordan Love":
+            return []
+        return [NewsItem(
+            title="Packers stay aggressive",
+            snippet="Packers plan to stay aggressive...",
+            link="https://example.com/a",
+            source="ESPN",
+            published_at="2026-09-01T00:00:00+00:00",
+        )]
 
     context = build_context(
         ["Jordan Love", "Jared Goff"], week=5, tables=_fixture_tables(), news_fn=news_fn
