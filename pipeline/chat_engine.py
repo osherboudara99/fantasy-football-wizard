@@ -62,11 +62,14 @@ def _check_recommendation(recommendation: Recommendation | None, players: list[s
     """
     if recommendation is None:
         return
-    answered = {recommendation.start.strip().casefold(), recommendation.bench.strip().casefold()}
+    start = recommendation.start.strip().casefold()
+    bench = recommendation.bench.strip().casefold()
+    if start == bench:
+        raise DecisionError(f"LLM recommended the same player to start and bench: {recommendation.start}")
     known = {name.strip().casefold() for name in players}
-    if not answered <= known:
+    if not {start, bench} <= known:
         raise DecisionError(
-            f"LLM recommended players not among those discussed: {sorted(answered - known)}"
+            f"LLM recommended players not among those discussed: {sorted({start, bench} - known)}"
         )
 
 

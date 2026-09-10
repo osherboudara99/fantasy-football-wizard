@@ -10,9 +10,23 @@ function activeMentionQuery(text) {
   return { start: at, query: afterAt }
 }
 
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+// Derived from the message text itself (rather than tracked as separate state
+// updated only on selection) so that manually editing or deleting an "@Name"
+// token also removes it from what gets sent - selecting a mention and then
+// backspacing over it must not leave a stale mention behind.
+function mentionsStillInText(text, players) {
+  return players.filter((name) => {
+    const pattern = new RegExp(`(?<!\\w)@${escapeRegExp(name)}(?!\\w)`, 'i')
+    return pattern.test(text)
+  })
+}
+
 export default function ChatInput({ players, onSend, disabled }) {
   const [text, setText] = useState('')
-  const [mentionedPlayers, setMentionedPlayers] = useState([])
 
   const mention = useMemo(() => activeMentionQuery(text), [text])
   const suggestions = useMemo(() => {
@@ -24,16 +38,14 @@ export default function ChatInput({ players, onSend, disabled }) {
   function selectMention(name) {
     const before = text.slice(0, mention.start)
     setText(`${before}@${name} `)
-    setMentionedPlayers((prev) => (prev.includes(name) ? prev : [...prev, name]))
   }
 
   function handleSubmit(event) {
     event.preventDefault()
     const trimmed = text.trim()
     if (!trimmed || disabled) return
-    onSend(trimmed, mentionedPlayers)
+    onSend(trimmed, mentionsStillInText(trimmed, players))
     setText('')
-    setMentionedPlayers([])
   }
 
   return (

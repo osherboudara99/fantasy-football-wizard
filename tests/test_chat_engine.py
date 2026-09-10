@@ -155,3 +155,25 @@ def test_chat_rejects_a_recommendation_naming_an_undiscussed_player(monkeypatch)
             tables=_fixture_tables(),
             news_fn=lambda *_: [],
         )
+
+
+def test_chat_rejects_a_recommendation_starting_and_benching_the_same_player(monkeypatch):
+    """A degenerate start==bench recommendation must not slip past the subset check
+    just because a one-element set is trivially a subset of the discussed players.
+    """
+    rec = Recommendation(
+        start="Jordan Love", bench="jordan love", confidence=0.8,
+        key_factors=[], risk_factors=[],
+    )
+    monkeypatch.setattr(
+        "pipeline.chat_engine.run_chat_llm",
+        lambda *_a, **_k: ChatAnswer(answer="x", recommendation=rec),
+    )
+    with pytest.raises(DecisionError):
+        chat(
+            "Should I start Jordan Love or Jared Goff?",
+            mentioned_players=["Jordan Love", "Jared Goff"],
+            week=5,
+            tables=_fixture_tables(),
+            news_fn=lambda *_: [],
+        )
