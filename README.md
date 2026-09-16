@@ -548,7 +548,7 @@ Scheduling:
 - **Frontend**: Cloudflare Pages — free tier, unlimited static bandwidth, deploys the Vite build on git push
 - **Backend**: Dockerized FastAPI on GCP Cloud Run — scale-to-zero, free tier (~2M requests/month) covers personal use
 - **Data refresh**: Cloud Run Jobs + Cloud Scheduler (replaces local cron); artifacts written to a GCS bucket
-- **State caveat**: Cloud Run is stateless/ephemeral — Parquet files and `chroma_db/` must live in GCS (FUSE volume mount or download-on-start), not on local disk
+- **State caveat**: Cloud Run is stateless/ephemeral — Parquet files and `chroma_db/` must live in GCS, not on local disk. **Implemented**: `pipeline/gcs_sync.py`'s `sync_from_gcs()` downloads them into the same local paths at FastAPI startup (a lifespan hook, gated on the `GCS_BUCKET` env var — unset in local dev, so nothing changes there). Download-on-start was chosen over a GCS FUSE volume mount because Chroma's SQLite backend needs file-locking semantics FUSE doesn't reliably support; still needs a real bucket populated by the refresh job before this can be exercised end-to-end.
 - **Cold-start caveat**: keep `sentence-transformers` (torch) out of the request path — embed at refresh time in the Cloud Run Job; the API container should only *query* Chroma. Otherwise scale-to-zero cold starts take tens of seconds and the image balloons past 2GB.
 - Fallback if statefulness gets annoying: a small always-on VM (Fly.io / Lightsail, ~$5/mo) with a persistent volume
 
