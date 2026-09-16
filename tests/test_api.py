@@ -1,7 +1,13 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from api.main import MAX_HISTORY_TURNS, MAX_MENTIONED_PLAYERS, MAX_QUESTION_LENGTH, app
+from api.main import (
+    MAX_HISTORY_TURNS,
+    MAX_MENTIONED_PLAYERS,
+    MAX_QUESTION_LENGTH,
+    _maybe_sync_from_gcs,
+    app,
+)
 from llm.interface import Recommendation
 from pipeline.chat_engine import ChatResult, NoPlayersFoundError
 from pipeline.context_builder import PlayerNotFoundError
@@ -170,6 +176,20 @@ def test_decision_error_is_a_400(monkeypatch):
     assert response.json()["detail"] == "LLM answered about someone else"
 
 
+def test_post_chat_missing_data_file_is_a_503(monkeypatch):
+    """A GCS sync failure (or a fresh container that hasn't synced yet) leaves the
+    processed files missing - that must surface as a clean outage, not a raw 500.
+    """
+    def raise_file_not_found(*_a, **_k):
+        raise FileNotFoundError("data/processed/player_stats.parquet")
+
+    monkeypatch.setattr("api.main.chat", raise_file_not_found)
+    response = client.post(
+        "/chat", json={"message": "Should I start Jordan Love?", "mentioned_players": ["Jordan Love"]}
+    )
+    assert response.status_code == 503
+
+
 def test_get_players_returns_the_known_name_universe(monkeypatch):
     monkeypatch.setattr("api.main.known_player_names", lambda: ["Jordan Love", "Jared Goff"])
     response = client.get("/players")
@@ -178,5 +198,34 @@ def test_get_players_returns_the_known_name_universe(monkeypatch):
     assert response.json() == ["Jordan Love", "Jared Goff"]
 
 
+def test_get_players_missing_data_file_is_a_503(monkeypatch):
+    def raise_file_not_found():
+        raise FileNotFoundError("data/processed/player_stats.parquet")
+
+    monkeypatch.setattr("api.main.known_player_names", raise_file_not_found)
+    response = client.get("/players")
+    assert response.status_code == 503
+
+
 def test_health_check():
     assert client.get("/health").json() == {"status": "ok"}
+
+
+def test_maybe_sync_from_gcs_calls_sync_when_bucket_is_set(monkeypatch):
+    monkeypatch.setenv("GCS_BUCKET", "my-bucket")
+    calls = []
+    monkeypatch.setattr("api.main.sync_from_gcs", lambda bucket: calls.append(bucket))
+
+    _maybe_sync_from_gcs()
+
+    assert calls == ["my-bucket"]
+
+
+def test_maybe_sync_from_gcs_skips_when_bucket_is_unset(monkeypatch):
+    monkeypatch.delenv("GCS_BUCKET", raising=False)
+    calls = []
+    monkeypatch.setattr("api.main.sync_from_gcs", lambda bucket: calls.append(bucket))
+
+    _maybe_sync_from_gcs()
+
+    assert calls == []

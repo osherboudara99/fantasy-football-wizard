@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 
+from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
 from dotenv import load_dotenv
@@ -22,6 +23,7 @@ from pipeline.chat_engine import NoPlayersFoundError, chat
 from pipeline.context_builder import PlayerNotFoundError
 from pipeline.decision_engine import DataUnavailableError, DecisionError
 from pipeline.entity_extraction import known_player_names
+from pipeline.gcs_sync import sync_from_gcs
 
 # The frontend is a separate origin in dev (Vite on 5173) and in prod (Cloudflare
 # Pages), so the allowed origins have to be configurable per deployment.
@@ -36,9 +38,29 @@ MAX_PLAYER_NAME_LENGTH = 100
 MAX_MENTIONED_PLAYERS = 10
 MAX_HISTORY_TURNS = 20
 
+DATA_UNAVAILABLE_DETAIL = "Player data is unavailable; try again later."
+
 load_dotenv()
 
-app = FastAPI(title="Fantasy Football Wizard", version="0.1.0")
+
+def _maybe_sync_from_gcs() -> None:
+    """Download processed data + the Chroma index before serving traffic.
+
+    Cloud Run sets GCS_BUCKET; local dev leaves it unset, so this is a no-op
+    and local dev keeps reading data/ and embeddings/ straight off disk.
+    """
+    bucket = os.getenv("GCS_BUCKET")
+    if bucket:
+        sync_from_gcs(bucket)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _maybe_sync_from_gcs()
+    yield
+
+
+app = FastAPI(title="Fantasy Football Wizard", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -102,7 +124,12 @@ def health() -> dict[str, str]:
 @app.get("/players")
 def players() -> list[str]:
     """Every player the processed data knows about, for the frontend's @-mention search."""
-    return known_player_names()
+    try:
+        return known_player_names()
+    except FileNotFoundError as exc:
+        # Missing local file (GCS sync failed, or hasn't run yet) - same outage
+        # signal as DataUnavailableError, just from a different failure mode.
+        raise HTTPException(status_code=503, detail=DATA_UNAVAILABLE_DETAIL) from exc
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -124,9 +151,11 @@ def chat_endpoint(request: ChatRequest) -> ChatResponse:
     except DataUnavailableError as exc:
         # The refresh job hasn't populated data/ - nothing the caller can fix, and
         # the underlying message names server paths, so don't echo it back.
-        raise HTTPException(
-            status_code=503, detail="Player data is unavailable; try again later."
-        ) from exc
+        raise HTTPException(status_code=503, detail=DATA_UNAVAILABLE_DETAIL) from exc
+    except FileNotFoundError as exc:
+        # Missing local file (GCS sync failed, or hasn't run yet) - same outage
+        # signal as DataUnavailableError, just from a different failure mode.
+        raise HTTPException(status_code=503, detail=DATA_UNAVAILABLE_DETAIL) from exc
     except DecisionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

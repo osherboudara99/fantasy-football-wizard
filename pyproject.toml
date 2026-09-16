@@ -16,6 +16,7 @@ dependencies = [
   "pydantic",
   "anthropic",
   "python-dotenv>=1.2.1",
+  "google-cloud-storage>=3.14.1",
 ]
 
 [project.optional-dependencies]
