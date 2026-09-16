@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from pipeline.gcs_sync import sync_from_gcs
+import pytest
+
+from pipeline.gcs_sync import UnsafeBlobPathError, sync_from_gcs
 
 
 class _FakeBlob:
@@ -80,3 +82,22 @@ def test_sync_from_gcs_uses_the_named_bucket(tmp_path, monkeypatch):
 
     sync_from_gcs("my-bucket", client=_TrackingClient(bucket))
     assert seen["bucket_name"] == "my-bucket"
+
+
+def test_sync_from_gcs_rejects_a_blob_name_that_escapes_chroma_dir(tmp_path, monkeypatch):
+    """A blob outside our control (compromised bucket, bad refresh job) must not
+    be able to write outside CHROMA_DIR via a `..` component in its name.
+    """
+    monkeypatch.setattr("pipeline.gcs_sync.PROCESSED_DIR", tmp_path / "processed")
+    monkeypatch.setattr("pipeline.gcs_sync.CHROMA_DIR", tmp_path / "chroma_db")
+    bucket = _FakeBucket([
+        "data/processed/player_stats.parquet",
+        "data/processed/projections.parquet",
+        "data/processed/injuries.parquet",
+        "embeddings/chroma_db/../../escaped.txt",
+    ])
+
+    with pytest.raises(UnsafeBlobPathError):
+        sync_from_gcs("my-bucket", client=_FakeClient(bucket))
+
+    assert not (tmp_path / "escaped.txt").exists()

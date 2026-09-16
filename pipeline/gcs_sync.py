@@ -8,6 +8,8 @@ is completely unaffected.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from google.cloud import storage
 
 from pipeline.context_builder import PROCESSED_DIR
@@ -19,6 +21,25 @@ CHROMA_PREFIX = "embeddings/chroma_db/"
 
 def log(msg: str) -> None:
     print(f"[gcs_sync] {msg}")
+
+
+class UnsafeBlobPathError(ValueError):
+    """Raised when a blob name would resolve outside CHROMA_DIR."""
+
+
+def _resolve_chroma_destination(blob_name: str) -> Path:
+    """Map a `CHROMA_PREFIX`-relative blob name to a path under CHROMA_DIR.
+
+    A bucket blob is untrusted input - a `..` component or an absolute-looking
+    suffix (e.g. `embeddings/chroma_db/../../etc/passwd`) could otherwise
+    resolve outside CHROMA_DIR and let anyone with bucket-write access
+    overwrite arbitrary files in the container.
+    """
+    relative = blob_name.removeprefix(CHROMA_PREFIX)
+    destination = (CHROMA_DIR / relative).resolve()
+    if destination != CHROMA_DIR.resolve() and CHROMA_DIR.resolve() not in destination.parents:
+        raise UnsafeBlobPathError(f"blob {blob_name!r} resolves outside CHROMA_DIR")
+    return destination
 
 
 def sync_from_gcs(bucket_name: str, client: storage.Client | None = None) -> None:
@@ -41,7 +62,7 @@ def sync_from_gcs(bucket_name: str, client: storage.Client | None = None) -> Non
     CHROMA_DIR.mkdir(parents=True, exist_ok=True)
     blobs = [b for b in bucket.list_blobs(prefix=CHROMA_PREFIX) if not b.name.endswith("/")]
     for blob in blobs:
-        destination = CHROMA_DIR / blob.name.removeprefix(CHROMA_PREFIX)
+        destination = _resolve_chroma_destination(blob.name)
         destination.parent.mkdir(parents=True, exist_ok=True)
         blob.download_to_filename(str(destination))
     log(f"downloaded {len(blobs)} chroma_db files")
