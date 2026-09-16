@@ -46,8 +46,10 @@ DATA_UNAVAILABLE_DETAIL = "Player data is unavailable; try again later."
 
 # CORS is not a defense against abuse - it only constrains browsers, and curl
 # ignores it entirely. This caps how many paid LLM calls one caller can trigger
-# per hour (README §14). In-process/per-instance rather than global: fine at
-# this app's scale, revisit if it ever scales out past one Cloud Run instance.
+# per hour (README §14). In-process/per-instance counters, not shared across
+# replicas - the Cloud Run service MUST be deployed with --max-instances=1 or
+# a second instance resets this caller's quota to another 30/hour. See the
+# "Deploy-time requirement" note under README §14's rate limiting section.
 CHAT_RATE_LIMIT = "30/hour"
 
 load_dotenv()

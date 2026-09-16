@@ -580,12 +580,20 @@ already in `api/main.py` (`MAX_QUESTION_LENGTH`, `MAX_PLAYER_NAME_LENGTH`) bound
 cost of a single request but not the number of requests.
 
 **Implemented**: `slowapi` (in-process Starlette middleware) limits `POST /chat` to
-`CHAT_RATE_LIMIT` (30 requests/hour per caller IP, via `get_remote_address`); `/players`
-and `/health` are unlimited since they cost no LLM call. Per-instance rather than
-global — fine at this app's personal-use scale, since scale-out isn't planned; revisit
-if that changes. A **Cloud Armor rate-limit policy** in front of Cloud Run remains a
-worthwhile follow-up once the service has a real URL (drops abuse before it reaches a
-billable container at all), but isn't required to go live — see Phase 7 below.
+`CHAT_RATE_LIMIT` (30 requests/hour per caller IP, keyed by `api/main.py`'s `_client_ip()`
+— the rightmost `X-Forwarded-For` entry, since that's the one Cloud Run's GFE proxy
+itself appends and a caller can't forge, not the leftmost caller-supplied one);
+`/players` and `/health` are unlimited since they cost no LLM call.
+
+**Deploy-time requirement, not yet applied (no Cloud Run service exists yet)**: the
+limiter's counters are in-memory per instance, not shared across replicas. Under
+Cloud Run's default autoscaling, one caller triggering the limit is itself the kind of
+burst that can spin up a second instance — which starts with an empty counter and
+grants that same caller another 30/hour. **Before this ships publicly, the Cloud Run
+service must be deployed with `--max-instances=1`** (fine at personal-use traffic
+levels) so the in-process limiter stays meaningful; if scale-out is ever needed, a
+**Cloud Armor rate-limit policy** in front of Cloud Run replaces this in-process limit
+entirely — see Phase 7 below.
 
 `/docs`, `/redoc`, and `/openapi.json` are **disabled in prod**: `api/main.py`'s
 `_docs_config()` passes `docs_url=None, redoc_url=None, openapi_url=None` to `FastAPI()`
