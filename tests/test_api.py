@@ -253,6 +253,22 @@ def test_post_chat_rate_limits_after_30_requests_per_hour(stub_chat):
     assert response.status_code == 429
 
 
+def test_post_chat_rate_limit_is_keyed_per_forwarded_client_ip(stub_chat):
+    """Behind Cloud Run's proxy, every request's raw socket peer is identical -
+    the limiter must key off X-Forwarded-For or every real caller would share
+    one collective bucket instead of getting 30/hour each.
+    """
+    payload = {"message": "Should I start Jordan Love?", "mentioned_players": ["Jordan Love"]}
+    for _ in range(30):
+        response = client.post("/chat", json=payload, headers={"X-Forwarded-For": "1.1.1.1"})
+        assert response.status_code == 200
+    exhausted = client.post("/chat", json=payload, headers={"X-Forwarded-For": "1.1.1.1"})
+    assert exhausted.status_code == 429
+
+    other_caller = client.post("/chat", json=payload, headers={"X-Forwarded-For": "2.2.2.2"})
+    assert other_caller.status_code == 200
+
+
 def test_get_players_is_not_rate_limited(monkeypatch):
     """/players costs no LLM call, so it isn't subject to the /chat limit."""
     monkeypatch.setattr("api.main.known_player_names", lambda: ["Jordan Love"])

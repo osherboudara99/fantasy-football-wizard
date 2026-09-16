@@ -52,7 +52,25 @@ CHAT_RATE_LIMIT = "30/hour"
 
 load_dotenv()
 
-limiter = Limiter(key_func=get_remote_address)
+
+def _client_ip(request: Request) -> str:
+    """Key the rate limiter by the real caller, not Cloud Run's ingress proxy.
+
+    Cloud Run terminates the connection and forwards to the container from an
+    internal proxy address, so every request's raw socket peer
+    (get_remote_address's source) would be identical - collapsing every real
+    caller into one shared 30/hour bucket instead of 30/hour each. Cloud
+    Run's front end sets X-Forwarded-For with the real client IP as the first
+    entry; local dev (nothing in front of uvicorn) never sets this header, so
+    this falls back to the socket address there.
+    """
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return get_remote_address(request)
+
+
+limiter = Limiter(key_func=_client_ip)
 
 
 def _docs_config() -> dict[str, str | None]:
