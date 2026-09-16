@@ -269,6 +269,24 @@ def test_post_chat_rate_limit_is_keyed_per_forwarded_client_ip(stub_chat):
     assert other_caller.status_code == 200
 
 
+def test_post_chat_rate_limit_trusts_only_the_rightmost_forwarded_address(stub_chat):
+    """The rightmost X-Forwarded-For entry is the one Cloud Run's GFE itself
+    appended; everything left of it is caller-supplied. A caller sending a
+    fresh fake leftmost value on every request must not dodge the limit.
+    """
+    payload = {"message": "Should I start Jordan Love?", "mentioned_players": ["Jordan Love"]}
+    for i in range(30):
+        response = client.post(
+            "/chat", json=payload, headers={"X-Forwarded-For": f"{i}.{i}.{i}.{i}, 5.5.5.5"}
+        )
+        assert response.status_code == 200
+
+    still_exhausted = client.post(
+        "/chat", json=payload, headers={"X-Forwarded-For": "99.99.99.99, 5.5.5.5"}
+    )
+    assert still_exhausted.status_code == 429
+
+
 def test_get_players_is_not_rate_limited(monkeypatch):
     """/players costs no LLM call, so it isn't subject to the /chat limit."""
     monkeypatch.setattr("api.main.known_player_names", lambda: ["Jordan Love"])

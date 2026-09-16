@@ -59,14 +59,21 @@ def _client_ip(request: Request) -> str:
     Cloud Run terminates the connection and forwards to the container from an
     internal proxy address, so every request's raw socket peer
     (get_remote_address's source) would be identical - collapsing every real
-    caller into one shared 30/hour bucket instead of 30/hour each. Cloud
-    Run's front end sets X-Forwarded-For with the real client IP as the first
-    entry; local dev (nothing in front of uvicorn) never sets this header, so
-    this falls back to the socket address there.
+    caller into one shared 30/hour bucket instead of 30/hour each.
+
+    Cloud Run's GFE is a single trusted proxy hop directly in front of the
+    container: like any reverse proxy, it appends the address it observed to
+    the *end* of any X-Forwarded-For header already on the request, so the
+    rightmost entry is the one GFE itself attests to. Everything to its left -
+    including the entire header, if a caller sends one - is attacker-supplied
+    input; trusting the leftmost entry would let a caller dodge the limit by
+    sending a fresh fake value on every request. Local dev (nothing in front
+    of uvicorn) never sets this header, so this falls back to the socket
+    address there.
     """
     forwarded_for = request.headers.get("x-forwarded-for")
     if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
+        return forwarded_for.split(",")[-1].strip()
     return get_remote_address(request)
 
 
