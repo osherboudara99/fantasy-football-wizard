@@ -5,6 +5,7 @@ from api.main import (
     MAX_HISTORY_TURNS,
     MAX_MENTIONED_PLAYERS,
     MAX_QUESTION_LENGTH,
+    _docs_config,
     _maybe_sync_from_gcs,
     app,
 )
@@ -15,6 +16,16 @@ from pipeline.decision_engine import DataUnavailableError, DecisionError
 from retrieval.news_retriever import NewsItem
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    """The limiter's in-memory counters persist on `app.state` across tests
+    since `app` is a module-level singleton - without a reset, whichever test
+    runs 31st in the file would spuriously see a 429.
+    """
+    app.state.limiter.reset()
+    yield
 
 
 def _fixture_chat_result(recommendation=None):
@@ -229,3 +240,38 @@ def test_maybe_sync_from_gcs_skips_when_bucket_is_unset(monkeypatch):
     _maybe_sync_from_gcs()
 
     assert calls == []
+
+
+def test_post_chat_rate_limits_after_30_requests_per_hour(stub_chat):
+    """POST /chat spends an LLM call every time - cap abuse per caller."""
+    payload = {"message": "Should I start Jordan Love?", "mentioned_players": ["Jordan Love"]}
+    for _ in range(30):
+        response = client.post("/chat", json=payload)
+        assert response.status_code == 200
+
+    response = client.post("/chat", json=payload)
+    assert response.status_code == 429
+
+
+def test_get_players_is_not_rate_limited(monkeypatch):
+    """/players costs no LLM call, so it isn't subject to the /chat limit."""
+    monkeypatch.setattr("api.main.known_player_names", lambda: ["Jordan Love"])
+    for _ in range(35):
+        assert client.get("/players").status_code == 200
+
+
+def test_docs_config_disables_docs_when_gcs_bucket_is_set(monkeypatch):
+    monkeypatch.setenv("GCS_BUCKET", "my-bucket")
+    assert _docs_config() == {"docs_url": None, "redoc_url": None, "openapi_url": None}
+
+
+def test_docs_config_keeps_docs_when_gcs_bucket_is_unset(monkeypatch):
+    monkeypatch.delenv("GCS_BUCKET", raising=False)
+    assert _docs_config() == {}
+
+
+def test_docs_are_reachable_in_the_local_dev_environment():
+    """GCS_BUCKET is unset for the whole test run, so the live `app` singleton
+    was built with docs enabled - confirms the wiring, not just the helper.
+    """
+    assert client.get("/docs").status_code == 200

@@ -15,9 +15,13 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, StringConstraints
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
 
 from pipeline.chat_engine import NoPlayersFoundError, chat
 from pipeline.context_builder import PlayerNotFoundError
@@ -40,7 +44,24 @@ MAX_HISTORY_TURNS = 20
 
 DATA_UNAVAILABLE_DETAIL = "Player data is unavailable; try again later."
 
+# CORS is not a defense against abuse - it only constrains browsers, and curl
+# ignores it entirely. This caps how many paid LLM calls one caller can trigger
+# per hour (README §14). In-process/per-instance rather than global: fine at
+# this app's scale, revisit if it ever scales out past one Cloud Run instance.
+CHAT_RATE_LIMIT = "30/hour"
+
 load_dotenv()
+
+limiter = Limiter(key_func=get_remote_address)
+
+
+def _docs_config() -> dict[str, str | None]:
+    """Disable /docs, /redoc, /openapi.json in prod - they advertise the paid
+    endpoint's schema. Cloud Run sets GCS_BUCKET; local dev leaves it unset.
+    """
+    if os.getenv("GCS_BUCKET"):
+        return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    return {}
 
 
 def _maybe_sync_from_gcs() -> None:
@@ -60,7 +81,12 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Fantasy Football Wizard", version="0.1.0", lifespan=lifespan)
+app = FastAPI(
+    title="Fantasy Football Wizard", version="0.1.0", lifespan=lifespan, **_docs_config()
+)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -133,14 +159,20 @@ def players() -> list[str]:
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat_endpoint(request: ChatRequest) -> ChatResponse:
-    """Answer any fantasy-football question about the mentioned/named players."""
+@limiter.limit(CHAT_RATE_LIMIT)
+def chat_endpoint(request: Request, chat_request: ChatRequest) -> ChatResponse:
+    """Answer any fantasy-football question about the mentioned/named players.
+
+    Takes the raw `Request` too (unused directly) because slowapi's `@limiter.limit`
+    reads the caller's address off it - the parameter name `request` is what
+    `get_remote_address` expects to find.
+    """
     try:
         result = chat(
-            request.message,
-            mentioned_players=request.mentioned_players,
-            week=request.week,
-            history=[turn.model_dump() for turn in request.history],
+            chat_request.message,
+            mentioned_players=chat_request.mentioned_players,
+            week=chat_request.week,
+            history=[turn.model_dump() for turn in chat_request.history],
         )
     except NoPlayersFoundError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
