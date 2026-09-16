@@ -13,6 +13,8 @@ from typing import Callable
 
 import polars as pl
 
+from retrieval.news_retriever import NewsItem
+
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 PROCESSED_DIR = DATA_DIR / "processed"
 
@@ -61,7 +63,7 @@ def _format_player(
     name: str,
     week: int,
     tables: dict[str, pl.DataFrame],
-    news_fn: Callable[[str | None, str], list[str]] | None,
+    news_fn: Callable[[str | None, str], list[NewsItem]] | None,
 ) -> str:
     """One player's block: name header, last-3-week avg, projection, injury status, news."""
     stats = tables["player_stats"].filter(
@@ -85,7 +87,7 @@ def _format_player(
         news_items = news_fn(player_id, name)
         if news_items:
             lines.append("- Recent news:")
-            lines.extend(f'  - "{item}"' for item in news_items)
+            lines.extend(f'  - "{item.snippet}"' for item in news_items)
     return "\n".join(lines)
 
 
@@ -93,7 +95,7 @@ def build_context(
     players: list[str],
     week: int,
     tables: dict[str, pl.DataFrame] | None = None,
-    news_fn: Callable[[str | None, str], list[str]] | None = None,
+    news_fn: Callable[[str | None, str], list[NewsItem]] | None = None,
 ) -> str:
     """Build the §7 PLAYER COMPARISON block for the given players and week.
 

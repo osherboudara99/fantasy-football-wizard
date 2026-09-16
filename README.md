@@ -7,7 +7,7 @@
 
 ```powershell
 uv venv --python 3.11
-uv sync
+uv sync --extra refresh --extra dev
 ```
 
 3. Activate the environment:
@@ -15,10 +15,35 @@ uv sync
 ```powershell
 .\.venv\Scripts\Activate.ps1
 ```
+```zsh
+source .venv/bin/activate
+```
 
 Notes:
-- Dependencies are defined in `pyproject.toml`; `uv sync` regenerates `uv.lock`.
+- Dependencies are defined in `pyproject.toml`; `uv sync` regenerates `uv.lock`. The base `dependencies` list (Phase 7 on) is deliberately just what the FastAPI request path needs — no `nflreadpy`/`pandas`/`sentence-transformers`/torch, per §13's "no torch in the API image." Local dev needs the `refresh` extra too (data/news/embeddings scripts + their tests) — `dev` adds `pytest`/`ruff`/notebook tooling. The API's Docker image installs the base group only.
 - Copy `.env.example` to `.env` and fill in `ANTHROPIC_API_KEY` (optionally `ANTHROPIC_MODEL`) — never commit `.env`.
+
+## Running the app locally
+
+Backend (from repo root, venv active):
+```zsh
+uvicorn api.main:app --reload
+```
+Serves on `http://localhost:8000` (`GET /health`, `GET /players`, `POST /recommendation`).
+
+Frontend (separate terminal):
+```zsh
+cd frontend
+npm run dev
+```
+Serves on Vite's default (`http://localhost:5173`) and calls the backend via `VITE_API_BASE_URL` (defaults to `http://localhost:8000`); CORS on the backend already allows Vite's default origin.
+
+If `data/{raw,staged,processed}/*.parquet` or `embeddings/chroma_db/` are missing or stale, regenerate them (needs the `refresh` extra):
+```zsh
+python -m scripts.refresh_stats
+python -m scripts.refresh_news
+python -m embeddings.build_embeddings
+```
 
 ---
 

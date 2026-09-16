@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Goal
 
-A **decision-support system** (not a chatbot) for fantasy football start/sit and flex decisions. It combines structured NFL stats/projections with RAG over fantasy news to produce explained recommendations.
+A conversational decision-support tool for fantasy football. It combines structured NFL stats/projections with RAG over fantasy news to answer start/sit, flex, and trade questions in a chat interface, with cited sources. (Revised 2026-09-09 — originally scoped as "not a chatbot"; the user decided a chat interface covering more question types is the direction going forward. Design: `docs/superpowers/specs/2026-09-09-chat-assistant-design.md`.)
 
-**Non-goals (v1)**: draft strategy, trades, waiver wire optimization, DFS/betting advice, full-season simulations.
+**Non-goals (v1)**: draft strategy (deferred — needs new ADP/rankings data, explicitly saved for a later task, not dropped), waiver wire optimization, DFS/betting advice, full-season simulations. Trade evaluation is now in scope (removed from non-goals 2026-09-09) — it reuses the existing stats/news context with no dedicated value model.
 
 ## Source of Truth
 
@@ -25,7 +25,8 @@ Authoritative sequence and done-checks live in README → Development Roadmap. C
 - **Phase 4 — FastAPI backend: done** (`api/main.py`; `POST /recommendation` (players + optional week/question → recommendation JSON incl. the context it was built from), `GET /players`, `GET /health`; CORS origins via `FRONTEND_ORIGINS`; `PlayerNotFoundError`→404, `DataUnavailableError`→503, `DecisionError`→400; `tests/test_api.py` covers endpoints and error mapping with a stubbed pipeline. **No auth or rate limiting yet** — the user decided Aug 2026 that rate limiting is required and belongs in Phase 7, before the service gets a public URL; options are tabled in README §14)
 - **Phase 5 — React frontend: done** (`frontend/` Vite + React app; player pickers call `GET /players`, submit calls `POST /recommendation`, results render start/bench, a confidence bar, key/risk factors, and a collapsible debug view of the raw context; `VITE_API_BASE_URL` env var points at the backend, default `http://localhost:8000`; CORS already allows Vite's default origin. **Post-deployment backlog** (user request, 2026-08-06, deliberately deferred until after Phase 7): typeahead player search instead of long `<select>` lists, defense/DST comparison support, a league scoring config (e.g. reception points), and personal branding/links — see README §10)
 - **Phase 6 — News RAG: done** (`scripts/refresh_news.py` fetches ESPN/Yahoo/RotoBaller RSS, tags each item with known player(s) via `pipeline.entity_extraction`, keeps items from the last `--max-age-days` (default 10) days, writes `data/{raw,processed}/news.parquet`; run as `python -m scripts.refresh_news` — it imports `pipeline`, so a bare script path won't resolve. When a display name maps to more than one `player_id` in `player_stats.parquet` (e.g. two real "Byron Young"s), that name's tags are dropped rather than guessed — no fuzzy/context-based disambiguation from RSS text. `embeddings/build_embeddings.py` embeds tagged rows with `sentence-transformers` (`all-MiniLM-L6-v2`) and upserts into a Chroma `news` collection at `embeddings/chroma_db/` (gitignored), one entry per article-player pair, keyed `{player_id}:{link}` so reruns upsert instead of duplicating; run as `python -m embeddings.build_embeddings`. `retrieval/news_retriever.py`'s `retrieve_news(player_id, player_name, k=3, max_age_days=7)` does a metadata-filtered (`player_id` + `published_ts >= cutoff`) semantic query, returning `[]` (never raising) if nothing's been embedded yet. `pipeline/context_builder.build_context()` gained an optional `news_fn` param that adds the §7 "Recent news" bullet only when passed — pre-Phase-6 callers with no `news_fn` are byte-identical to before; `pipeline/decision_engine.decide()` wires in the real `retrieve_news` by default)
-- **Phase 7 — Deployment (Cloud Run + Cloudflare Pages): not started**
+- **Chat assistant (inserted before Phase 7, decided 2026-09-09): not started** — replaces `POST /recommendation` and the picker-form frontend with `POST /chat` (general Q&A: start/sit, trade, single-player questions) and a chat UI with `@`-mention player search and cited news sources. Full design in `docs/superpowers/specs/2026-09-09-chat-assistant-design.md`. Draft strategy/ADP/rankings explicitly excluded — later task.
+- **Phase 7 — Deployment (Cloud Run + Cloudflare Pages): not started** (rate limiting/docs-lockdown now scoped to `/chat` once it exists)
 - **Phase 8 — Evaluation: not started**
 
 When a phase's done-check passes, update its status line here and in the README roadmap table.
@@ -61,9 +62,13 @@ Canonical free sources were vetted July 2026 and are tabled in README section 1.
 Environment (uv-managed, `pyproject.toml` is the dependency source of truth):
 ```powershell
 uv venv --python 3.11
-uv sync
+uv sync --extra refresh --extra dev   # local dev: everything, including refresh scripts + tests
 .\.venv\Scripts\Activate.ps1
 ```
+Bare `uv sync` (no extras) installs only what the FastAPI request path needs - no
+`nflreadpy`/`pandas`/`sentence-transformers`/torch. That's what `Dockerfile` uses
+for the API image (README §13's "no torch in the API image"); it's too lean to run
+`scripts/refresh_*.py`, `embeddings/build_embeddings.py`, or the full test suite.
 
 Run:
 ```powershell

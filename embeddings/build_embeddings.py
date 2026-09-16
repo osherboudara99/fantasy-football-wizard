@@ -45,6 +45,7 @@ def _row_metadata(row: dict) -> dict:
     return {
         "player_id": row["player_id"] or "",
         "player_name": row["player_name"] or "",
+        "title": row["title"] or "",
         "source": row["source"] or "",
         "link": row["link"] or "",
         "published_at": published_at.isoformat() if published_at is not None else "",

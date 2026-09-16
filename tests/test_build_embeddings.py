@@ -59,6 +59,7 @@ def test_build_embeddings_upserts_one_row_per_article_with_metadata(isolated_col
     metadata = result["metadatas"][0]
     assert metadata["player_id"] == "00-1"
     assert metadata["player_name"] == "Jordan Love"
+    assert metadata["title"] == "Jordan Love day-to-day"
     assert metadata["published_ts"] == int(datetime(2026, 8, 10, tzinfo=timezone.utc).timestamp())
 
 
