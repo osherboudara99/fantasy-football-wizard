@@ -572,27 +572,33 @@ Benefits include:
 - **Debugging:** Endpoints can be tested independently with tools like Postman or `curl`.
 - **Resume Value:** Demonstrates experience building a production-ready ML API.
 
-### Rate limiting (required before going public — Phase 7)
+### Rate limiting (done, code-level; Cloud Armor still pending actual deploy)
 
-`POST /recommendation` spends the owner's Anthropic credits on every call, and the
-local build has no auth or rate limiting. CORS is not a defense — it only constrains
-browsers, and `curl` ignores it entirely. Before the service gets a public Cloud Run
-URL it needs a per-caller limit; the input caps already in `api/main.py`
-(`MAX_QUESTION_LENGTH`, `MAX_PLAYER_NAME_LENGTH`) bound the cost of a single request
-but not the number of requests.
+`POST /chat` spends the owner's Anthropic credits on every call, and CORS is not a
+defense — it only constrains browsers, and `curl` ignores it entirely. The input caps
+already in `api/main.py` (`MAX_QUESTION_LENGTH`, `MAX_PLAYER_NAME_LENGTH`) bound the
+cost of a single request but not the number of requests.
 
-Options, cheapest first:
-- **Cloud Armor rate-limit policy** in front of Cloud Run — per-IP throttling with no
-  application code, and it drops abuse before it reaches a billable container.
-- **`slowapi`** (Starlette middleware, in-process) — simple, but per-instance rather
-  than global, so scale-out multiplies the effective limit.
-- **A shared secret header** the frontend sends — trivially extractable from a public
-  SPA, so it deters scripts but doesn't stop a determined caller; pair it with one of
-  the above rather than relying on it alone.
+**Implemented**: `slowapi` (in-process Starlette middleware) limits `POST /chat` to
+`CHAT_RATE_LIMIT` (30 requests/hour per caller IP, keyed by `api/main.py`'s `_client_ip()`
+— the rightmost `X-Forwarded-For` entry, since that's the one Cloud Run's GFE proxy
+itself appends and a caller can't forge, not the leftmost caller-supplied one);
+`/players` and `/health` are unlimited since they cost no LLM call.
 
-`/docs`, `/redoc`, and `/openapi.json` are also open (they contain no secrets, but
-they do advertise the paid endpoint's schema) — consider disabling them in prod via
-`FastAPI(docs_url=None, redoc_url=None, openapi_url=None)`.
+**Deploy-time requirement, not yet applied (no Cloud Run service exists yet)**: the
+limiter's counters are in-memory per instance, not shared across replicas. Under
+Cloud Run's default autoscaling, one caller triggering the limit is itself the kind of
+burst that can spin up a second instance — which starts with an empty counter and
+grants that same caller another 30/hour. **Before this ships publicly, the Cloud Run
+service must be deployed with `--max-instances=1`** (fine at personal-use traffic
+levels) so the in-process limiter stays meaningful; if scale-out is ever needed, a
+**Cloud Armor rate-limit policy** in front of Cloud Run replaces this in-process limit
+entirely — see Phase 7 below.
+
+`/docs`, `/redoc`, and `/openapi.json` are **disabled in prod**: `api/main.py`'s
+`_docs_config()` passes `docs_url=None, redoc_url=None, openapi_url=None` to `FastAPI()`
+whenever `GCS_BUCKET` is set (the same signal Cloud Run vs. local dev already uses
+elsewhere in this file); local dev keeps them on.
 
 ### Example FastAPI Endpoint
 
