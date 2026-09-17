@@ -427,29 +427,59 @@ def _completed_weeks(staged: pl.DataFrame, season: int, week: int) -> pl.DataFra
     return staged.filter(is_before_target & (season_type == "REG"))
 
 
+def _own_last_n(df: pl.DataFrame, n: int) -> pl.DataFrame:
+    """Each player's own last `n` rows of `df`, most-recent first.
+
+    Per-player, not a global top-`n`-weeks list intersected per player: a player
+    who missed the league's single most recent week (bye, injury) must still get
+    their own last `n` played games, not a thinner or misaligned window.
+    """
+    return (
+        df.sort(["season", "week"], descending=True)
+        .group_by("player_id", maintain_order=True)
+        .head(n)
+    )
+
+
 def build_processed_player_stats(staged: pl.DataFrame, season: int, week: int) -> pl.DataFrame:
-    """Collapse weekly staged stats into one row per player: last-3-week and season averages.
+    """Collapse weekly staged stats into one row per player.
 
     `week` is the week being decided about, so every aggregate here covers weeks
     strictly before it - a projection for a game already in the books is not a
     projection.
+
+    "Last 3" figures never blend across a season boundary: they're this player's
+    own last <=3 games of the *current* season only, even if that's 0, 1, or 2
+    games. Last season's stats are surfaced separately (full-season average, last
+    <=3 games of that season, i.e. how they finished) rather than averaged in -
+    context_builder decides when last season is still worth showing.
     """
     completed = _completed_weeks(staged, season, week)
-    season_to_date = completed.filter(pl.col("season") == season)
+    this_season = completed.filter(pl.col("season") == season)
+    prior_season = completed.filter(pl.col("season") == season - 1)
 
-    # "last 3 weeks" = the 3 most recent completed weeks, taken chronologically
-    # (bye weeks simply thin the window since there's no row for that player that week).
-    recent = (
-        completed.select(["season", "week"]).unique()
-        .sort(["season", "week"], descending=True)
-        .head(LAST_N_WEEKS)
+    this_season_last3 = _own_last_n(this_season, LAST_N_WEEKS)
+    prior_season_last3 = _own_last_n(prior_season, LAST_N_WEEKS)
+    most_recent_overall = _own_last_n(completed, 1)
+
+    # Every player who appears anywhere in `completed` has exactly one row here -
+    # the base identity table the rest of the aggregates join onto.
+    identity = most_recent_overall.select([
+        "player_id", "player_name", "position", "team",
+        pl.col("season").alias("last_game_season"),
+        pl.col("week").alias("last_game_week"),
+        pl.col("fantasy_points").alias("last_game_fantasy_points"),
+        pl.col("fantasy_points_ppr").alias("last_game_fantasy_points_ppr"),
+    ])
+
+    games_played_this_season = this_season.group_by("player_id").agg(
+        pl.len().alias("games_played_this_season")
     )
-    last3 = completed.join(recent, on=["season", "week"], how="semi")
+    prior_season_games_played = prior_season.group_by("player_id").agg(
+        pl.len().alias("prior_season_games_played")
+    )
 
-    aggregates = last3.group_by("player_id").agg([
-        pl.col("player_name").last(),
-        pl.col("position").last(),
-        pl.col("team").last(),
+    this_season_last3_agg = this_season_last3.group_by("player_id").agg([
         pl.mean("fantasy_points").alias("avg_fantasy_points_last3"),
         pl.mean("fantasy_points_ppr").alias("avg_fantasy_points_ppr_last3"),
         pl.mean("snap_percentage").alias("avg_snap_percentage_last3"),
@@ -458,28 +488,35 @@ def build_processed_player_stats(staged: pl.DataFrame, season: int, week: int) -
         pl.mean("xfp").alias("avg_xfp_last3"),
     ])
 
-    season_avg = season_to_date.group_by("player_id").agg([
+    season_avg = this_season.group_by("player_id").agg([
         pl.mean("fantasy_points").alias("avg_fantasy_points_season"),
         pl.mean("fantasy_points_ppr").alias("avg_fantasy_points_ppr_season"),
     ])
 
-    # "last week" = the most recent completed week, which in week 1 is the prior
-    # season's finale rather than a week that doesn't exist yet.
-    most_recent = recent.sort(["season", "week"], descending=True).head(1)
-    latest_week = (
-        completed.join(most_recent, on=["season", "week"], how="semi")
-        .select(["player_id", "fantasy_points", "fantasy_points_ppr"])
-        .rename({
-            "fantasy_points": "fantasy_points_last_week",
-            "fantasy_points_ppr": "fantasy_points_ppr_last_week",
-        })
-    )
+    prior_season_avg = prior_season.group_by("player_id").agg([
+        pl.mean("fantasy_points").alias("prior_season_avg_fantasy_points"),
+        pl.mean("fantasy_points_ppr").alias("prior_season_avg_fantasy_points_ppr"),
+    ])
+
+    prior_season_last3_agg = prior_season_last3.group_by("player_id").agg([
+        pl.mean("fantasy_points").alias("prior_season_last3_avg_fantasy_points"),
+        pl.mean("fantasy_points_ppr").alias("prior_season_last3_avg_fantasy_points_ppr"),
+    ])
 
     return (
-        aggregates
+        identity
+        .join(games_played_this_season, on="player_id", how="left")
+        .join(this_season_last3_agg, on="player_id", how="left")
         .join(season_avg, on="player_id", how="left")
-        .join(latest_week, on="player_id", how="left")
-        .with_columns([pl.lit(season).alias("season"), pl.lit(week).alias("week")])
+        .join(prior_season_games_played, on="player_id", how="left")
+        .join(prior_season_avg, on="player_id", how="left")
+        .join(prior_season_last3_agg, on="player_id", how="left")
+        .with_columns([
+            pl.col("games_played_this_season").fill_null(0),
+            pl.col("prior_season_games_played").fill_null(0),
+            pl.lit(season).alias("season"),
+            pl.lit(week).alias("week"),
+        ])
     )
 
 
