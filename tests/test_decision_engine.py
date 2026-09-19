@@ -4,11 +4,14 @@ from pydantic import ValidationError
 
 from llm.interface import Recommendation
 from pipeline.decision_engine import (
+    DataUnavailableError,
     Decision,
     DecisionError,
     decide,
     format_decision,
     resolve_players,
+    resolve_season,
+    target_season_week,
     target_week,
 )
 
@@ -196,17 +199,28 @@ def test_resolve_players_rejects_the_same_player_twice():
         resolve_players("some question", ["Jordan Love", "jordan love "])
 
 
-def test_target_week_reads_the_max_week_in_processed_stats(monkeypatch):
-    fixture = pl.DataFrame({"week": [16, 18, 17]})
-    monkeypatch.setattr("pipeline.decision_engine.pl.read_parquet", lambda *_, **__: fixture)
-    assert target_week() == 18
+def test_target_season_week_reads_the_meta_file(monkeypatch):
+    fixture = pl.DataFrame({"season": [2026], "week": [8]})
+    monkeypatch.setattr("pipeline.decision_engine.Path.exists", lambda self: True)
+    monkeypatch.setattr("pipeline.decision_engine.pl.read_parquet", lambda *_: fixture)
+    assert target_season_week() == (2026, 8)
+    assert target_week() == 8
 
 
-def test_target_week_raises_on_empty_processed_stats(monkeypatch):
-    empty = pl.DataFrame({"week": []}, schema={"week": pl.Int32})
-    monkeypatch.setattr("pipeline.decision_engine.pl.read_parquet", lambda *_, **__: empty)
-    with pytest.raises(DecisionError):
-        target_week()
+def test_target_season_week_raises_when_meta_file_is_missing(monkeypatch):
+    monkeypatch.setattr("pipeline.decision_engine.Path.exists", lambda self: False)
+    with pytest.raises(DataUnavailableError):
+        target_season_week()
+
+
+def test_resolve_season_prefers_the_explicit_argument(monkeypatch):
+    monkeypatch.setattr("pipeline.decision_engine.target_season_week", lambda: (2026, 8))
+    assert resolve_season(2025) == 2025
+
+
+def test_resolve_season_falls_back_to_the_meta_file(monkeypatch):
+    monkeypatch.setattr("pipeline.decision_engine.target_season_week", lambda: (2026, 8))
+    assert resolve_season(None) == 2026
 
 
 def test_format_decision_renders_the_recommendation_fields():
