@@ -407,22 +407,28 @@ Convert raw data into a clean, LLM-friendly comparison format.
 
 Example Context
 
+Recent-form lines never blend across a season boundary (fixed 2026-09-19 — see
+CLAUDE.md Phase 1/2): once a player has 3+ games played this season, only
+this-season numbers appear; earlier in a season, this-season and last-season
+figures are shown as separate, clearly-labeled lines instead of one averaged
+number.
+
 ```
 PLAYER COMPARISON
 
 Jordan Love:
-- Avg fantasy points (last 3 weeks): 18.4
+- This season (4 games): 17.9 season avg, 18.4 avg over last 3 games
 - Projected points: 17.1
 - Injury: Questionable -> Full practice Friday
 - Recent news:
   - "Packers plan to stay aggressive..."
 
-Jared Goff:
-- Avg fantasy points (last 3 weeks): 12.1
-- Projected points: 14.3
+Malik Nabers:
+- This season (1 game): 6.9 avg fantasy points
+- Last season (4 games): 9.8 season avg, 10.7 avg over final 3 games
+- Most recent game played (Week 1, 2026): 6.9 pts
+- Projected points: 13.8
 - Injury: Healthy
-- Recent news:
-  - "Cold weather may impact passing..."
 
 
 ```
