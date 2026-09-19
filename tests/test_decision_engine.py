@@ -17,23 +17,30 @@ from pipeline.decision_engine import (
 
 
 def _fixture_tables():
-    player_stats = pl.DataFrame({
-        "player_name": ["Jordan Love", "Jared Goff"],
-        "week": [5, 5],
-        "games_played_this_season": [4, 4],
-        "avg_fantasy_points_ppr_season": [17.9, 11.8],
-        "avg_fantasy_points_ppr_last3": [18.4, 12.1],
-        "prior_season_games_played": [0, 0],
-    })
+    player_stats = pl.DataFrame([
+        {"player_id": "00-love", "player_name": "Jordan Love", "season": 2026, "week": w,
+         "pass_yards": 0, "pass_tds": 0, "pass_interceptions": 0, "pass_2pt": 0,
+         "rush_yards": 0, "rush_tds": 0, "rush_2pt": 0, "rush_attempts": 0,
+         "receptions": 1, "rec_yards": 195, "rec_tds": 0, "rec_2pt": 0, "fumbles_lost": 0}
+        for w in range(1, 5)
+    ] + [
+        {"player_id": "00-goff", "player_name": "Jared Goff", "season": 2026, "week": w,
+         "pass_yards": 0, "pass_tds": 0, "pass_interceptions": 0, "pass_2pt": 0,
+         "rush_yards": 0, "rush_tds": 0, "rush_2pt": 0, "rush_attempts": 0,
+         "receptions": 1, "rec_yards": 125, "rec_tds": 0, "rec_2pt": 0, "fumbles_lost": 0}
+        for w in range(1, 5)
+    ])
     projections = pl.DataFrame({
-        "player_name": ["Jordan Love", "Jared Goff"],
+        "player_id": ["00-love", "00-goff"], "player_name": ["Jordan Love", "Jared Goff"],
         "week": [5, 5],
-        "projected_points": [17.1, 14.3],
+        "pass_yards": [0, 0], "pass_tds": [0, 0], "pass_interceptions": [0, 0], "pass_2pt": [0, 0],
+        "rush_yards": [0, 0], "rush_tds": [0, 0], "rush_2pt": [0, 0], "rush_attempts": [0, 0],
+        "receptions": [1, 1], "rec_yards": [161, 133], "rec_tds": [0, 0], "rec_2pt": [0, 0],
+        "fumbles_lost": [0, 0],
     })
     injuries = pl.DataFrame({
-        "player_name": ["Jordan Love"],
-        "status": ["Questionable"],
-        "practice_level": ["Full practice Friday"],
+        "player_id": ["00-love"], "player_name": ["Jordan Love"],
+        "status": ["Questionable"], "practice_level": ["Full practice Friday"],
     })
     return {"player_stats": player_stats, "projections": projections, "injuries": injuries}
 
@@ -70,7 +77,8 @@ def stub_llm(monkeypatch):
 def test_decide_passes_built_context_and_question_to_the_llm(stub_llm):
     question = "Should I start Jordan Love or Jared Goff in week 5?"
     decision = decide(
-        question, tables=_fixture_tables(), players=["Jordan Love", "Jared Goff"], news_fn=_no_news
+        question, tables=_fixture_tables(), players=["Jordan Love", "Jared Goff"],
+        season=2026, news_fn=_no_news,
     )
 
     assert isinstance(decision, Decision)
@@ -90,6 +98,7 @@ def test_decide_extracts_players_and_week_from_the_question(monkeypatch, stub_ll
     decision = decide(
         "Who do I start in week 5, Jared Goff or Jordan Love?",
         tables=_fixture_tables(),
+        season=2026,
         news_fn=_no_news,
     )
 
@@ -99,7 +108,7 @@ def test_decide_extracts_players_and_week_from_the_question(monkeypatch, stub_ll
 
 def test_decide_falls_back_to_target_week_when_question_has_none(monkeypatch, stub_llm):
     """A question without "week N" uses whatever week the processed data holds."""
-    monkeypatch.setattr("pipeline.decision_engine.target_week", lambda: 5)
+    monkeypatch.setattr("pipeline.decision_engine.target_season_week", lambda: (2026, 5))
     decision = decide(
         "Jordan Love or Jared Goff?",
         players=["Jordan Love", "Jared Goff"],
@@ -118,6 +127,7 @@ def test_explicit_week_overrides_the_question_text(monkeypatch, stub_llm):
     decision = decide(
         "Jordan Love or Jared Goff in week 5?",
         players=["Jordan Love", "Jared Goff"],
+        season=2026,
         week=9,
         tables=tables,
         news_fn=_no_news,
@@ -135,6 +145,7 @@ def test_week_zero_in_the_question_is_not_swallowed_by_the_fallback(monkeypatch,
     decision = decide(
         "Jordan Love or Jared Goff in week 0?",
         players=["Jordan Love", "Jared Goff"],
+        season=2026,
         tables=tables,
         news_fn=_no_news,
     )
@@ -153,6 +164,7 @@ def test_decide_defaults_news_fn_to_the_real_retriever(monkeypatch, stub_llm):
     decide(
         "Jordan Love or Jared Goff in week 5?",
         players=["Jordan Love", "Jared Goff"],
+        season=2026,
         tables=_fixture_tables(),
     )
 
@@ -172,6 +184,7 @@ def test_decide_rejects_a_recommendation_about_other_players(monkeypatch):
         decide(
             "Jordan Love or Jared Goff in week 5?",
             players=["Jordan Love", "Jared Goff"],
+            season=2026,
             tables=_fixture_tables(),
             news_fn=_no_news,
         )
