@@ -72,10 +72,12 @@ def test_resolve_target_week_raises_when_the_requested_season_is_over(monkeypatc
         resolve_target_week(2025, None)
 
 
-def test_stats_seasons_reaches_back_only_early_in_the_season():
-    assert stats_seasons(2026, 1) == [2025, 2026]
-    assert stats_seasons(2026, 3) == [2025, 2026]
-    assert stats_seasons(2026, 4) == [2026]
+def test_stats_seasons_always_includes_the_prior_season():
+    """Prior-season data is a per-player fallback for thin current-season samples
+    (injury, suspension, late call-up) that can happen at any week, not just
+    early in the season - so it must always be fetched, never dropped mid-season.
+    """
+    assert stats_seasons(2026) == [2025, 2026]
 
 
 def _weekly_staged(seasons, weeks, points, season_types=None):
@@ -104,31 +106,95 @@ def test_build_processed_player_stats_excludes_the_target_week():
         points=[5.0, 10.0, 15.0, 20.0],
     )
 
-    result = build_processed_player_stats(staged, season=2025, week=18)
+    result = build_processed_player_stats(staged, season=2025, week=18, current_player_ids=["00-1"])
     row = result.row(0, named=True)
 
-    # last 3 completed weeks = 15, 16, 17
+    # last 3 completed weeks = 15, 16, 17, all this season
+    assert row["games_played_this_season"] == 3
     assert row["avg_fantasy_points_last3"] == 10.0
     # season to date = weeks 15-17, week 18 hasn't happened
     assert row["avg_fantasy_points_season"] == 10.0
-    assert row["fantasy_points_last_week"] == 15.0
+    assert row["last_game_fantasy_points"] == 15.0
+    assert row["last_game_season"] == 2025 and row["last_game_week"] == 17
+    # 3+ games this season already - no prior-season reference needed
+    assert row["prior_season_games_played"] == 0
 
 
-def test_build_processed_player_stats_carries_form_over_into_a_new_season():
-    """Week 1 has no completed weeks of its own - recent form comes from last season."""
+def test_build_processed_player_stats_never_blends_last3_across_a_season_boundary():
+    """Week 1 has no completed weeks of its own - "last3" must stay empty, not reach
+    back into last season and silently present a cross-season average as one number.
+    """
     staged = _weekly_staged(
         seasons=[2025, 2025, 2025, 2026], weeks=[16, 17, 18, 1],
         points=[6.0, 12.0, 18.0, 99.0],
     )
 
-    result = build_processed_player_stats(staged, season=2026, week=1)
+    result = build_processed_player_stats(staged, season=2026, week=1, current_player_ids=["00-1"])
     row = result.row(0, named=True)
 
-    assert row["avg_fantasy_points_last3"] == 12.0
-    assert row["fantasy_points_last_week"] == 18.0
+    assert row["games_played_this_season"] == 0
+    assert row["avg_fantasy_points_last3"] is None
     # season-to-date is the *target* season, which hasn't started
     assert row["avg_fantasy_points_season"] is None
+
+    # last season is offered separately, never averaged into this season's number
+    assert row["prior_season_games_played"] == 3
+    assert row["prior_season_avg_fantasy_points"] == 12.0
+    assert row["prior_season_last3_avg_fantasy_points"] == 12.0
+
+    # the single most recent game played, regardless of season, with when disclosed
+    assert row["last_game_fantasy_points"] == 18.0
+    assert row["last_game_season"] == 2025 and row["last_game_week"] == 18
     assert row["season"] == 2026 and row["week"] == 1
+
+
+def test_build_processed_player_stats_excludes_players_with_no_current_relevance():
+    """Always fetching the prior season (stats_seasons) must not resurrect retirees
+    or unsigned free agents - only players with a current-season game or a spot in
+    this week's roster/projection universe (current_player_ids) belong in the table.
+    """
+    staged = _weekly_staged(
+        seasons=[2025, 2025, 2025], weeks=[16, 17, 18],
+        points=[6.0, 12.0, 18.0],
+    )
+
+    result = build_processed_player_stats(staged, season=2026, week=1, current_player_ids=[])
+
+    assert result.height == 0
+
+
+def test_build_processed_player_stats_prior_season_last3_is_that_players_own_finish():
+    """An injury-shortened prior season (e.g. a torn ACL in week 4) must not be
+    padded out with someone else's games - the average covers only what they played.
+    """
+    staged = _weekly_staged(
+        seasons=[2025, 2025], weeks=[1, 2],
+        points=[7.0, 29.0],
+    )
+
+    result = build_processed_player_stats(staged, season=2026, week=1, current_player_ids=["00-1"])
+    row = result.row(0, named=True)
+
+    assert row["prior_season_games_played"] == 2
+    assert row["prior_season_avg_fantasy_points"] == 18.0
+    assert row["prior_season_last3_avg_fantasy_points"] == 18.0
+
+
+def test_build_processed_player_stats_drops_prior_season_once_three_games_played():
+    """Once this season has its own 3-game sample, last season stops mattering."""
+    staged = _weekly_staged(
+        seasons=[2025, 2025, 2026, 2026, 2026], weeks=[17, 18, 1, 2, 3],
+        points=[5.0, 5.0, 10.0, 20.0, 30.0],
+    )
+
+    result = build_processed_player_stats(staged, season=2026, week=4, current_player_ids=["00-1"])
+    row = result.row(0, named=True)
+
+    assert row["games_played_this_season"] == 3
+    assert row["avg_fantasy_points_last3"] == 20.0
+    assert row["avg_fantasy_points_season"] == 20.0
+    # still computed (cheap to keep), but context_builder is what decides not to show it
+    assert row["prior_season_games_played"] == 2
 
 
 def test_build_processed_player_stats_ignores_postseason_weeks():
@@ -139,11 +205,12 @@ def test_build_processed_player_stats_ignores_postseason_weeks():
         season_types=["REG", "REG", "POST"],
     )
 
-    result = build_processed_player_stats(staged, season=2026, week=1)
+    result = build_processed_player_stats(staged, season=2026, week=1, current_player_ids=["00-1"])
     row = result.row(0, named=True)
 
-    assert row["avg_fantasy_points_last3"] == 10.0
-    assert row["fantasy_points_last_week"] == 10.0
+    assert row["prior_season_avg_fantasy_points"] == 10.0
+    assert row["last_game_fantasy_points"] == 10.0
+    assert row["last_game_week"] == 18
 
 
 def test_build_staged_injuries_matches_whitespace_padded_sleeper_ids():

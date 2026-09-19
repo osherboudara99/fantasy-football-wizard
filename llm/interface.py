@@ -8,10 +8,25 @@ from pydantic import BaseModel, Field
 
 DEFAULT_MODEL = "claude-haiku-4-5"
 
+RECENCY_WEIGHTING_GUIDANCE = (
+    "The context separates a player's this-season stats from their last-season stats — "
+    "never average or blend the two yourself. This season's games, injury reports, and "
+    "news (depth-chart moves, a new starting QB, a scheme or coaching change, a trade) "
+    "are the primary signal; treat them as far more predictive of what happens next than "
+    "how the player performed last season. Last season's numbers are lower-confidence "
+    "background, useful mainly when this season's sample is small (0-2 games) or absent — "
+    "lean on them only to the extent this season's data doesn't yet answer the question, "
+    "and say so explicitly (e.g. 'with only one game of current-season data, last season's "
+    "usage is still informative here') rather than citing both seasons as if equally strong "
+    "evidence. If news describes a change that would make last season's stats stop applying "
+    "(new team, new role, new starter under center), say so and discount them accordingly."
+)
+
 SYSTEM_PROMPT = (
     "You are a fantasy football analyst. "
     "Use only the provided context — do not rely on outside knowledge of players. "
-    "Explain your reasoning clearly and explicitly assess risk."
+    "Explain your reasoning clearly and explicitly assess risk. "
+    + RECENCY_WEIGHTING_GUIDANCE
 )
 
 
@@ -41,7 +56,8 @@ CHAT_SYSTEM_PROMPT = (
     "or flex-style comparison between players, also fill in `recommendation` with "
     "a start/bench pick, a confidence between 0 and 1, and key/risk factors; for "
     "any other question (a single player's outlook, a trade evaluation, or a "
-    "general question), leave `recommendation` unset and answer only in `answer`."
+    "general question), leave `recommendation` unset and answer only in `answer`. "
+    + RECENCY_WEIGHTING_GUIDANCE
 )
 
 
