@@ -31,8 +31,6 @@ SLEEPER_PLAYER_FIELDS = [
     "practice_participation",
 ]
 
-LAST_N_WEEKS = 3
-
 # nflreadpy.load_ff_rankings(type="week") always returns the latest FantasyPros
 # scrape - there's no way to request a historical week's ECR. Used to build an
 # empty-but-correctly-typed stand-in when the requested week isn't the current one.
@@ -124,11 +122,11 @@ def resolve_target_week(season: int | None, week: int | None) -> tuple[int, int]
 def stats_seasons(season: int) -> list[int]:
     """Seasons to pull weekly stats for: always the prior season plus the current one.
 
-    build_processed_player_stats() falls back to prior-season stats for any player
-    with fewer than LAST_N_WEEKS games played so far this season - a state that can
-    happen at any week (injury return, suspension, late call-up, bye-heavy stretch),
-    not just in the season's first few weeks - so the prior season must always be
-    fetched, not dropped once the season is underway.
+    pipeline.player_form.compute_recent_form() falls back to prior-season stats for
+    any player with a thin current-season sample - a state that can happen at any
+    week (injury return, suspension, late call-up, bye-heavy stretch), not just in
+    the season's first few weeks - so the prior season must always be fetched, not
+    dropped once the season is underway.
     """
     return [season - 1, season]
 
@@ -272,13 +270,29 @@ def _pfr_to_gsis(ff_playerids: pl.DataFrame) -> pl.DataFrame:
 
 
 def build_staged_player_stats(raw: dict[str, pl.DataFrame]) -> pl.DataFrame:
-    """Join weekly player_stats with snap counts, xFP, and Next Gen Stats on (player_id, season, week)."""
+    """Join weekly player_stats with snap counts, xFP, and Next Gen Stats on
+    (player_id, season, week). Selects the 13 canonical ScoringRules columns,
+    renamed from nflverse's names, so compute_fantasy_points never needs to
+    know the data's provider (docs/superpowers/specs/2026-09-19-custom-
+    league-scoring-design.md).
+    """
     stats = raw["player_stats"].select([
         "player_id", "player_display_name", "position", "team", "opponent_team",
-        "season", "week", "season_type", "targets", "receptions", "carries",
-        "rushing_epa", "receiving_epa", "passing_epa", "target_share",
-        "air_yards_share", "fantasy_points", "fantasy_points_ppr",
-    ]).rename({"player_display_name": "player_name"})
+        "season", "week", "season_type", "targets",
+        "passing_yards", "passing_tds", "passing_interceptions", "passing_2pt_conversions",
+        "rushing_yards", "rushing_tds", "rushing_2pt_conversions", "carries",
+        "receptions", "receiving_yards", "receiving_tds", "receiving_2pt_conversions",
+        "fumbles_lost_total",
+        "rushing_epa", "receiving_epa", "passing_epa", "target_share", "air_yards_share",
+    ]).rename({
+        "player_display_name": "player_name",
+        "passing_yards": "pass_yards", "passing_tds": "pass_tds",
+        "passing_interceptions": "pass_interceptions", "passing_2pt_conversions": "pass_2pt",
+        "rushing_yards": "rush_yards", "rushing_tds": "rush_tds",
+        "rushing_2pt_conversions": "rush_2pt", "carries": "rush_attempts",
+        "receiving_yards": "rec_yards", "receiving_tds": "rec_tds",
+        "receiving_2pt_conversions": "rec_2pt", "fumbles_lost_total": "fumbles_lost",
+    })
 
     pfr_map = _pfr_to_gsis(raw["ff_playerids"])
     snaps = (
@@ -429,109 +443,36 @@ def _completed_weeks(staged: pl.DataFrame, season: int, week: int) -> pl.DataFra
     return staged.filter(is_before_target & (season_type == "REG"))
 
 
-def _own_last_n(df: pl.DataFrame, n: int) -> pl.DataFrame:
-    """Each player's own last `n` rows of `df`, most-recent first.
-
-    Per-player, not a global top-`n`-weeks list intersected per player: a player
-    who missed the league's single most recent week (bye, injury) must still get
-    their own last `n` played games, not a thinner or misaligned window.
-    """
-    return (
-        df.sort(["season", "week"], descending=True)
-        .group_by("player_id", maintain_order=True)
-        .head(n)
-    )
+CANONICAL_STAT_COLUMNS = [
+    "pass_yards", "pass_tds", "pass_interceptions", "pass_2pt",
+    "rush_yards", "rush_tds", "rush_2pt", "rush_attempts",
+    "receptions", "rec_yards", "rec_tds", "rec_2pt", "fumbles_lost",
+]
 
 
 def build_processed_player_stats(
     staged: pl.DataFrame, season: int, week: int, current_player_ids
 ) -> pl.DataFrame:
-    """Collapse weekly staged stats into one row per player.
+    """One row per player per completed game, carrying raw counting stats for
+    request-time scoring (pipeline.scoring.compute_fantasy_points /
+    pipeline.player_form.compute_recent_form) instead of pre-aggregating under
+    one fixed formula.
 
-    `week` is the week being decided about, so every aggregate here covers weeks
-    strictly before it - a projection for a game already in the books is not a
-    projection.
-
-    "Last 3" figures never blend across a season boundary: they're this player's
-    own last <=3 games of the *current* season only, even if that's 0, 1, or 2
-    games. Last season's stats are surfaced separately (full-season average, last
-    <=3 games of that season, i.e. how they finished) rather than averaged in -
-    context_builder decides when last season is still worth showing.
-
-    `current_player_ids` (typically this week's projection/roster universe) keeps
-    the thin-current-season-sample fallback working for players who are still
-    relevant but caps it there: without this filter, always fetching the prior
-    season (see stats_seasons()) would let anyone who merely *played* last season
-    - retirees, unsigned free agents, anyone off the current player pool - leak
-    into the table on the strength of stale, no-longer-actionable production.
+    Still filters to weeks strictly before `week` (_completed_weeks - a
+    projection for a game already in the books is not a projection) and to
+    the current roster/projection universe (current_player_ids) - without
+    that filter, always fetching the prior season (stats_seasons) would let
+    anyone who merely *played* last season - retirees, unsigned free agents -
+    leak into the table on stale, no-longer-actionable production (PR #11).
     """
     completed = _completed_weeks(staged, season, week)
     this_season = completed.filter(pl.col("season") == season)
-    prior_season = completed.filter(pl.col("season") == season - 1)
-
-    this_season_last3 = _own_last_n(this_season, LAST_N_WEEKS)
-    prior_season_last3 = _own_last_n(prior_season, LAST_N_WEEKS)
-    most_recent_overall = _own_last_n(completed, 1)
-
-    # Every player who appears anywhere in `completed` has exactly one row here -
-    # the base identity table the rest of the aggregates join onto.
-    identity = most_recent_overall.select([
-        "player_id", "player_name", "position", "team",
-        pl.col("season").alias("last_game_season"),
-        pl.col("week").alias("last_game_week"),
-        pl.col("fantasy_points").alias("last_game_fantasy_points"),
-        pl.col("fantasy_points_ppr").alias("last_game_fantasy_points_ppr"),
-    ])
-
-    games_played_this_season = this_season.group_by("player_id").agg(
-        pl.len().alias("games_played_this_season")
-    )
-    prior_season_games_played = prior_season.group_by("player_id").agg(
-        pl.len().alias("prior_season_games_played")
-    )
-
-    this_season_last3_agg = this_season_last3.group_by("player_id").agg([
-        pl.mean("fantasy_points").alias("avg_fantasy_points_last3"),
-        pl.mean("fantasy_points_ppr").alias("avg_fantasy_points_ppr_last3"),
-        pl.mean("snap_percentage").alias("avg_snap_percentage_last3"),
-        pl.mean("targets").alias("avg_targets_last3"),
-        pl.mean("carries").alias("avg_carries_last3"),
-        pl.mean("xfp").alias("avg_xfp_last3"),
-    ])
-
-    season_avg = this_season.group_by("player_id").agg([
-        pl.mean("fantasy_points").alias("avg_fantasy_points_season"),
-        pl.mean("fantasy_points_ppr").alias("avg_fantasy_points_ppr_season"),
-    ])
-
-    prior_season_avg = prior_season.group_by("player_id").agg([
-        pl.mean("fantasy_points").alias("prior_season_avg_fantasy_points"),
-        pl.mean("fantasy_points_ppr").alias("prior_season_avg_fantasy_points_ppr"),
-    ])
-
-    prior_season_last3_agg = prior_season_last3.group_by("player_id").agg([
-        pl.mean("fantasy_points").alias("prior_season_last3_avg_fantasy_points"),
-        pl.mean("fantasy_points_ppr").alias("prior_season_last3_avg_fantasy_points_ppr"),
-    ])
-
-    result = (
-        identity
-        .join(games_played_this_season, on="player_id", how="left")
-        .join(this_season_last3_agg, on="player_id", how="left")
-        .join(season_avg, on="player_id", how="left")
-        .join(prior_season_games_played, on="player_id", how="left")
-        .join(prior_season_avg, on="player_id", how="left")
-        .join(prior_season_last3_agg, on="player_id", how="left")
-        .with_columns([
-            pl.col("games_played_this_season").fill_null(0),
-            pl.col("prior_season_games_played").fill_null(0),
-            pl.lit(season).alias("season"),
-            pl.lit(week).alias("week"),
-        ])
-    )
 
     relevant_ids = set(this_season["player_id"].to_list()) | set(current_player_ids)
-    return result.filter(pl.col("player_id").is_in(list(relevant_ids)))
+    return completed.filter(pl.col("player_id").is_in(list(relevant_ids))).select(
+        ["player_id", "player_name", "position", "team", "season", "week"]
+        + CANONICAL_STAT_COLUMNS
+    )
 
 
 def build_processed_injuries(staged: pl.DataFrame) -> pl.DataFrame:
@@ -578,6 +519,11 @@ def build_processed(staged: dict[str, pl.DataFrame], season: int, week: int) -> 
         ),
         "injuries": build_processed_injuries(staged["injuries"]),
         "projections": build_processed_projections(staged["projections"]),
+        # player_stats no longer carries a single target season/week per row
+        # (it's many historical per-game rows now) - this is the only place
+        # "what decision is in progress" survives. Read by
+        # pipeline.decision_engine.target_season_week().
+        "meta": pl.DataFrame({"season": [season], "week": [week]}),
     }
     for name, df in processed.items():
         _write(df, PROCESSED_DIR, name)
