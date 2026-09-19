@@ -179,7 +179,12 @@ def fetch_sleeper_players() -> pl.DataFrame:
 
 
 def fetch_sleeper_projections(season: int, week: int) -> pl.DataFrame:
-    """Fetch Sleeper's weekly projections (PPR/half-PPR/standard) for one season/week."""
+    """Fetch Sleeper's weekly projections for one season/week, keeping the raw
+    per-category values (confirmed live: pass_yd, pass_td, pass_int, pass_2pt,
+    rush_yd, rush_td, rush_2pt, rush_att, rec, rec_yd, rec_td, rec_2pt,
+    fum_lost) instead of a single pre-computed point total, so request-time
+    scoring (pipeline.scoring.compute_fantasy_points) can apply any tier.
+    """
     url = SLEEPER_PROJECTIONS_URL.format(season=season, week=week)
     resp = requests.get(url, params={"season_type": "regular"}, timeout=30)
     resp.raise_for_status()
@@ -197,9 +202,19 @@ def fetch_sleeper_projections(season: int, week: int) -> pl.DataFrame:
             "player_name": f"{first} {last}".strip() if first or last else None,
             "position": player.get("position"),
             "team": entry.get("team"),
-            "pts_ppr": stats.get("pts_ppr"),
-            "pts_half_ppr": stats.get("pts_half_ppr"),
-            "pts_std": stats.get("pts_std"),
+            "pass_yards": stats.get("pass_yd"),
+            "pass_tds": stats.get("pass_td"),
+            "pass_interceptions": stats.get("pass_int"),
+            "pass_2pt": stats.get("pass_2pt"),
+            "rush_yards": stats.get("rush_yd"),
+            "rush_tds": stats.get("rush_td"),
+            "rush_2pt": stats.get("rush_2pt"),
+            "rush_attempts": stats.get("rush_att"),
+            "receptions": stats.get("rec"),
+            "rec_yards": stats.get("rec_yd"),
+            "rec_tds": stats.get("rec_td"),
+            "rec_2pt": stats.get("rec_2pt"),
+            "fumbles_lost": stats.get("fum_lost"),
         })
     return pl.DataFrame(rows, infer_schema_length=None)
 
@@ -492,20 +507,20 @@ def build_processed_injuries(staged: pl.DataFrame) -> pl.DataFrame:
 
 
 def build_processed_projections(staged: pl.DataFrame) -> pl.DataFrame:
-    """Flatten staged projections into the final per-player projected_points/ecr_rank columns."""
-    return staged.filter(pl.col("player_id").is_not_null()).select([
-        "player_id",
-        pl.coalesce(["player_name", "player_name_ecr"]).alias("player_name"),
-        pl.coalesce(["position", "pos"]).alias("position"),
-        pl.coalesce(["team", "team_ecr"]).alias("team"),
-        "season", "week",
-        # PPR is this app's default scoring format (README §9); half-PPR/standard
-        # are kept alongside for a future league-scoring-aware context builder.
-        pl.col("pts_ppr").alias("projected_points"),
-        pl.lit("sleeper").alias("source"),
-        "pts_half_ppr", "pts_std",
-        "ecr_rank", "ecr_position_rank",
-    ])
+    """Flatten staged projections into raw per-category columns for request-
+    time scoring, plus ECR ranking.
+    """
+    return staged.filter(pl.col("player_id").is_not_null()).select(
+        [
+            "player_id",
+            pl.coalesce(["player_name", "player_name_ecr"]).alias("player_name"),
+            pl.coalesce(["position", "pos"]).alias("position"),
+            pl.coalesce(["team", "team_ecr"]).alias("team"),
+            "season", "week",
+        ]
+        + CANONICAL_STAT_COLUMNS
+        + [pl.lit("sleeper").alias("source"), "ecr_rank", "ecr_position_rank"]
+    )
 
 
 def build_processed(staged: dict[str, pl.DataFrame], season: int, week: int) -> None:

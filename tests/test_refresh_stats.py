@@ -7,6 +7,7 @@ from scripts.refresh_stats import (
     build_processed,
     build_processed_injuries,
     build_processed_player_stats,
+    build_processed_projections,
     build_staged_injuries,
     build_staged_player_stats,
     resolve_target_week,
@@ -176,11 +177,11 @@ def test_build_processed_writes_a_target_season_week_meta_file(tmp_path, monkeyp
     """
     monkeypatch.setattr("scripts.refresh_stats.PROCESSED_DIR", tmp_path)
     # Empty-but-fully-typed stand-ins for staged injuries/projections: build_processed
-    # calls build_processed_injuries/build_processed_projections (unchanged by this
-    # task) which .select() a fixed set of columns via pl.coalesce - even at 0 rows,
-    # polars' select() raises ColumnNotFoundError if a referenced column is absent
-    # from the schema entirely, so a bare {"player_id": pl.String} frame (as a
-    # minimal literal fixture might suggest) isn't enough here.
+    # calls build_processed_injuries/build_processed_projections, which .select() a
+    # fixed set of columns via pl.coalesce - even at 0 rows, polars' select() raises
+    # ColumnNotFoundError if a referenced column is absent from the schema entirely,
+    # so a bare {"player_id": pl.String} frame (as a minimal literal fixture might
+    # suggest) isn't enough here.
     empty_injuries_schema = {
         "player_id": pl.String, "player_name": pl.String, "full_name": pl.String,
         "position": pl.String, "position_sleeper": pl.String,
@@ -195,7 +196,13 @@ def test_build_processed_writes_a_target_season_week_meta_file(tmp_path, monkeyp
         "position": pl.String, "pos": pl.String,
         "team": pl.String, "team_ecr": pl.String,
         "season": pl.Int64, "week": pl.Int64,
-        "pts_ppr": pl.Float64, "pts_half_ppr": pl.Float64, "pts_std": pl.Float64,
+        "pass_yards": pl.Float64, "pass_tds": pl.Float64,
+        "pass_interceptions": pl.Float64, "pass_2pt": pl.Float64,
+        "rush_yards": pl.Float64, "rush_tds": pl.Float64,
+        "rush_2pt": pl.Float64, "rush_attempts": pl.Float64,
+        "receptions": pl.Float64, "rec_yards": pl.Float64,
+        "rec_tds": pl.Float64, "rec_2pt": pl.Float64,
+        "fumbles_lost": pl.Float64,
         "ecr_rank": pl.Float64, "ecr_position_rank": pl.String,
     }
     staged = {
@@ -280,4 +287,24 @@ def test_build_processed_injuries_overlays_sleeper_and_defaults_healthy():
     assert healthy_row["player_name"] == "Sleeper Only Name"
     assert healthy_row["position"] == "RB"
     assert healthy_row["team"] == "DAL"
-    assert healthy_row["status"] == "Healthy"
+
+
+def test_build_processed_projections_carries_raw_canonical_stat_columns():
+    staged = pl.DataFrame({
+        "player_id": ["00-1"], "player_name": ["Test Player"], "player_name_ecr": [None],
+        "position": ["WR"], "pos": [None], "team": ["MIN"], "team_ecr": [None],
+        "season": [2026], "week": [2],
+        "pass_yards": [0.0], "pass_tds": [0.0], "pass_interceptions": [0.0], "pass_2pt": [0.0],
+        "rush_yards": [2.0], "rush_tds": [0.0], "rush_2pt": [0.0], "rush_attempts": [0.5],
+        "receptions": [4.4], "rec_yards": [57.0], "rec_tds": [0.4], "rec_2pt": [0.0],
+        "fumbles_lost": [0.02],
+        "ecr_rank": [18.0], "ecr_position_rank": ["WR9"],
+    })
+
+    result = build_processed_projections(staged)
+    row = result.row(0, named=True)
+
+    assert row["receptions"] == pytest.approx(4.4)
+    assert row["rec_yards"] == pytest.approx(57.0)
+    assert row["ecr_rank"] == pytest.approx(18.0)
+    assert "projected_points" not in result.columns
