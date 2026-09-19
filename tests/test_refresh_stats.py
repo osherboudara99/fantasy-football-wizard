@@ -287,6 +287,7 @@ def test_build_processed_injuries_overlays_sleeper_and_defaults_healthy():
     assert healthy_row["player_name"] == "Sleeper Only Name"
     assert healthy_row["position"] == "RB"
     assert healthy_row["team"] == "DAL"
+    assert healthy_row["status"] == "Healthy"
 
 
 def test_build_processed_projections_carries_raw_canonical_stat_columns():
