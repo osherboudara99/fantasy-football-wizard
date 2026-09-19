@@ -68,6 +68,11 @@ def _format_recent_form(stats_row: dict) -> list[str]:
 
     Last season only appears once there aren't yet 3 games of this-season data
     to judge by - once there are, it stops being relevant and is left out.
+
+    Uses the PPR aggregates throughout: `projected_points` (README §7) is
+    defined from Sleeper's `pts_ppr`, so historical figures must be on the
+    same scoring basis or a receiver's/pass-catching back's projection would
+    silently be compared against a lower, non-PPR history.
     """
     games_this_season = stats_row["games_played_this_season"]
     if games_this_season == 0:
@@ -75,13 +80,13 @@ def _format_recent_form(stats_row: dict) -> list[str]:
     elif games_this_season < 3:
         lines = [
             f"- This season ({games_this_season} game{_plural(games_this_season)}): "
-            f"{stats_row['avg_fantasy_points_season']:.1f} avg fantasy points"
+            f"{stats_row['avg_fantasy_points_ppr_season']:.1f} avg fantasy points"
         ]
     else:
         lines = [
             f"- This season ({games_this_season} games): "
-            f"{stats_row['avg_fantasy_points_season']:.1f} season avg, "
-            f"{stats_row['avg_fantasy_points_last3']:.1f} avg over last 3 games"
+            f"{stats_row['avg_fantasy_points_ppr_season']:.1f} season avg, "
+            f"{stats_row['avg_fantasy_points_ppr_last3']:.1f} avg over last 3 games"
         ]
         return lines
 
@@ -90,13 +95,13 @@ def _format_recent_form(stats_row: dict) -> list[str]:
         finish_n = min(3, prior_games)
         lines.append(
             f"- Last season ({prior_games} game{_plural(prior_games)}): "
-            f"{stats_row['prior_season_avg_fantasy_points']:.1f} season avg, "
-            f"{stats_row['prior_season_last3_avg_fantasy_points']:.1f} "
+            f"{stats_row['prior_season_avg_fantasy_points_ppr']:.1f} season avg, "
+            f"{stats_row['prior_season_last3_avg_fantasy_points_ppr']:.1f} "
             f"avg over final {finish_n} game{_plural(finish_n)}"
         )
     lines.append(
         f"- Most recent game played (Week {stats_row['last_game_week']}, "
-        f"{stats_row['last_game_season']}): {stats_row['last_game_fantasy_points']:.1f} pts"
+        f"{stats_row['last_game_season']}): {stats_row['last_game_fantasy_points_ppr']:.1f} pts"
     )
     return lines
 

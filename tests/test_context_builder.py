@@ -11,8 +11,8 @@ def _fixture_tables():
         "player_name": ["Jordan Love", "Jared Goff"],
         "week": [5, 5],
         "games_played_this_season": [4, 4],
-        "avg_fantasy_points_season": [17.9, 11.8],
-        "avg_fantasy_points_last3": [18.4, 12.1],
+        "avg_fantasy_points_ppr_season": [19.5, 13.0],
+        "avg_fantasy_points_ppr_last3": [20.1, 13.4],
         "prior_season_games_played": [0, 0],
     })
     projections = pl.DataFrame({
@@ -34,11 +34,11 @@ def test_build_context_formats_two_player_comparison():
 
     assert context.startswith("PLAYER COMPARISON\n\n")
     assert (
-        "Jordan Love:\n- This season (4 games): 17.9 season avg, 18.4 avg over last 3 games\n"
+        "Jordan Love:\n- This season (4 games): 19.5 season avg, 20.1 avg over last 3 games\n"
         "- Projected points: 17.1\n- Injury: Questionable -> Full practice Friday" in context
     )
     assert (
-        "Jared Goff:\n- This season (4 games): 11.8 season avg, 12.1 avg over last 3 games\n"
+        "Jared Goff:\n- This season (4 games): 13.0 season avg, 13.4 avg over last 3 games\n"
         "- Projected points: 14.3\n- Injury: Healthy" in context
     )
 
@@ -52,8 +52,8 @@ def _id_keyed_tables():
         "player_name": ["Kenneth Walker III"],
         "week": [18],
         "games_played_this_season": [4],
-        "avg_fantasy_points_season": [10.5],
-        "avg_fantasy_points_last3": [11.0],
+        "avg_fantasy_points_ppr_season": [12.5],
+        "avg_fantasy_points_ppr_last3": [13.0],
         "prior_season_games_played": [0],
     })
     projections = pl.DataFrame({
@@ -137,12 +137,12 @@ def test_build_context_adds_a_news_bullet_per_snippet_when_news_fn_returns_some(
     )
 
     assert (
-        "Jordan Love:\n- This season (4 games): 17.9 season avg, 18.4 avg over last 3 games\n"
+        "Jordan Love:\n- This season (4 games): 19.5 season avg, 20.1 avg over last 3 games\n"
         "- Projected points: 17.1\n- Injury: Questionable -> Full practice Friday\n"
         '- Recent news:\n  - "Packers plan to stay aggressive..."' in context
     )
     assert (
-        "Jared Goff:\n- This season (4 games): 11.8 season avg, 12.1 avg over last 3 games\n"
+        "Jared Goff:\n- This season (4 games): 13.0 season avg, 13.4 avg over last 3 games\n"
         "- Projected points: 14.3\n- Injury: Healthy" in context
     )
     assert "Recent news" not in context.split("Jared Goff:")[1]
@@ -167,14 +167,14 @@ def _partial_current_season_tables(**overrides):
         "player_name": ["Malik Nabers"],
         "week": [2],
         "games_played_this_season": [1],
-        "avg_fantasy_points_season": [6.9],
-        "avg_fantasy_points_last3": [None],
+        "avg_fantasy_points_ppr_season": [9.9],
+        "avg_fantasy_points_ppr_last3": [None],
         "prior_season_games_played": [4],
-        "prior_season_avg_fantasy_points": [9.775],
-        "prior_season_last3_avg_fantasy_points": [10.75],
+        "prior_season_avg_fantasy_points_ppr": [13.775],
+        "prior_season_last3_avg_fantasy_points_ppr": [14.75],
         "last_game_season": [2026],
         "last_game_week": [1],
-        "last_game_fantasy_points": [6.9],
+        "last_game_fantasy_points_ppr": [9.9],
         **overrides,
     })
     projections = pl.DataFrame({"player_name": [], "week": [], "projected_points": []})
@@ -186,9 +186,9 @@ def test_build_context_shows_last_season_separately_when_this_season_is_thin():
     """A blended cross-season average must never appear - each season stands on its own."""
     context = build_context(["Malik Nabers"], week=2, tables=_partial_current_season_tables())
 
-    assert "- This season (1 game): 6.9 avg fantasy points" in context
-    assert "- Last season (4 games): 9.8 season avg, 10.8 avg over final 3 games" in context
-    assert "- Most recent game played (Week 1, 2026): 6.9 pts" in context
+    assert "- This season (1 game): 9.9 avg fantasy points" in context
+    assert "- Last season (4 games): 13.8 season avg, 14.8 avg over final 3 games" in context
+    assert "- Most recent game played (Week 1, 2026): 9.9 pts" in context
 
 
 def test_build_context_omits_last_season_once_three_current_season_games_exist():
@@ -200,11 +200,13 @@ def test_build_context_omits_last_season_once_three_current_season_games_exist()
 
 
 def test_build_context_shows_only_last_season_when_no_games_played_yet():
-    tables = _partial_current_season_tables(games_played_this_season=[0], avg_fantasy_points_season=[None])
+    tables = _partial_current_season_tables(
+        games_played_this_season=[0], avg_fantasy_points_ppr_season=[None]
+    )
     context = build_context(["Malik Nabers"], week=2, tables=tables)
 
     assert "- This season: no games played yet" in context
-    assert "- Last season (4 games): 9.8 season avg, 10.8 avg over final 3 games" in context
+    assert "- Last season (4 games): 13.8 season avg, 14.8 avg over final 3 games" in context
 
 
 def test_build_context_omits_last_season_line_when_player_has_none(monkeypatch):
@@ -213,13 +215,13 @@ def test_build_context_omits_last_season_line_when_player_has_none(monkeypatch):
     """
     tables = _partial_current_season_tables(
         prior_season_games_played=[0],
-        prior_season_avg_fantasy_points=[None],
-        prior_season_last3_avg_fantasy_points=[None],
+        prior_season_avg_fantasy_points_ppr=[None],
+        prior_season_last3_avg_fantasy_points_ppr=[None],
     )
     context = build_context(["Malik Nabers"], week=2, tables=tables)
 
     assert "Last season" not in context
-    assert "- Most recent game played (Week 1, 2026): 6.9 pts" in context
+    assert "- Most recent game played (Week 1, 2026): 9.9 pts" in context
 
 
 def test_build_context_raises_for_unknown_player():
