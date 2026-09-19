@@ -72,10 +72,12 @@ def test_resolve_target_week_raises_when_the_requested_season_is_over(monkeypatc
         resolve_target_week(2025, None)
 
 
-def test_stats_seasons_reaches_back_only_early_in_the_season():
-    assert stats_seasons(2026, 1) == [2025, 2026]
-    assert stats_seasons(2026, 3) == [2025, 2026]
-    assert stats_seasons(2026, 4) == [2026]
+def test_stats_seasons_always_includes_the_prior_season():
+    """Prior-season data is a per-player fallback for thin current-season samples
+    (injury, suspension, late call-up) that can happen at any week, not just
+    early in the season - so it must always be fetched, never dropped mid-season.
+    """
+    assert stats_seasons(2026) == [2025, 2026]
 
 
 def _weekly_staged(seasons, weeks, points, season_types=None):

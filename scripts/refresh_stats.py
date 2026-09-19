@@ -121,14 +121,16 @@ def resolve_target_week(season: int | None, week: int | None) -> tuple[int, int]
     return season or target["season"], week or target["week"]
 
 
-def stats_seasons(season: int, week: int) -> list[int]:
-    """Seasons to pull weekly stats for, given the target week.
+def stats_seasons(season: int) -> list[int]:
+    """Seasons to pull weekly stats for: always the prior season plus the current one.
 
-    Early in a season there aren't LAST_N_WEEKS completed weeks yet, so the prior
-    season is pulled too and the recent-form window carries over into it. Mid-season
-    that's dead weight, so only fetch it when the window actually reaches back.
+    build_processed_player_stats() falls back to prior-season stats for any player
+    with fewer than LAST_N_WEEKS games played so far this season - a state that can
+    happen at any week (injury return, suspension, late call-up, bye-heavy stretch),
+    not just in the season's first few weeks - so the prior season must always be
+    fetched, not dropped once the season is underway.
     """
-    return [season - 1, season] if week <= LAST_N_WEEKS else [season]
+    return [season - 1, season]
 
 
 # ---------------------------------------------------------------------------
@@ -217,7 +219,7 @@ def fetch_raw(season: int, week: int, fetch_ecr: bool) -> dict[str, pl.DataFrame
     else:
         log(f"skipping FantasyPros ECR: season={season} week={week} is not the current week")
         ff_rankings = pl.DataFrame(schema=FF_RANKINGS_ECR_SCHEMA)
-    seasons = stats_seasons(season, week)
+    seasons = stats_seasons(season)
     log(f"pulling weekly stats for seasons={seasons}")
     raw = {
         "player_stats": load_by_season(
