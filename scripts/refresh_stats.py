@@ -443,7 +443,9 @@ def _own_last_n(df: pl.DataFrame, n: int) -> pl.DataFrame:
     )
 
 
-def build_processed_player_stats(staged: pl.DataFrame, season: int, week: int) -> pl.DataFrame:
+def build_processed_player_stats(
+    staged: pl.DataFrame, season: int, week: int, current_player_ids
+) -> pl.DataFrame:
     """Collapse weekly staged stats into one row per player.
 
     `week` is the week being decided about, so every aggregate here covers weeks
@@ -455,6 +457,13 @@ def build_processed_player_stats(staged: pl.DataFrame, season: int, week: int) -
     games. Last season's stats are surfaced separately (full-season average, last
     <=3 games of that season, i.e. how they finished) rather than averaged in -
     context_builder decides when last season is still worth showing.
+
+    `current_player_ids` (typically this week's projection/roster universe) keeps
+    the thin-current-season-sample fallback working for players who are still
+    relevant but caps it there: without this filter, always fetching the prior
+    season (see stats_seasons()) would let anyone who merely *played* last season
+    - retirees, unsigned free agents, anyone off the current player pool - leak
+    into the table on the strength of stale, no-longer-actionable production.
     """
     completed = _completed_weeks(staged, season, week)
     this_season = completed.filter(pl.col("season") == season)
@@ -505,7 +514,7 @@ def build_processed_player_stats(staged: pl.DataFrame, season: int, week: int) -
         pl.mean("fantasy_points_ppr").alias("prior_season_last3_avg_fantasy_points_ppr"),
     ])
 
-    return (
+    result = (
         identity
         .join(games_played_this_season, on="player_id", how="left")
         .join(this_season_last3_agg, on="player_id", how="left")
@@ -520,6 +529,9 @@ def build_processed_player_stats(staged: pl.DataFrame, season: int, week: int) -
             pl.lit(week).alias("week"),
         ])
     )
+
+    relevant_ids = set(this_season["player_id"].to_list()) | set(current_player_ids)
+    return result.filter(pl.col("player_id").is_in(list(relevant_ids)))
 
 
 def build_processed_injuries(staged: pl.DataFrame) -> pl.DataFrame:
@@ -557,8 +569,13 @@ def build_processed_projections(staged: pl.DataFrame) -> pl.DataFrame:
 
 def build_processed(staged: dict[str, pl.DataFrame], season: int, week: int) -> None:
     """Build and persist all processed/*.parquet tables from the staged tables."""
+    current_player_ids = (
+        staged["projections"].filter(pl.col("player_id").is_not_null())["player_id"].to_list()
+    )
     processed = {
-        "player_stats": build_processed_player_stats(staged["player_stats"], season, week),
+        "player_stats": build_processed_player_stats(
+            staged["player_stats"], season, week, current_player_ids
+        ),
         "injuries": build_processed_injuries(staged["injuries"]),
         "projections": build_processed_projections(staged["projections"]),
     }

@@ -106,7 +106,7 @@ def test_build_processed_player_stats_excludes_the_target_week():
         points=[5.0, 10.0, 15.0, 20.0],
     )
 
-    result = build_processed_player_stats(staged, season=2025, week=18)
+    result = build_processed_player_stats(staged, season=2025, week=18, current_player_ids=["00-1"])
     row = result.row(0, named=True)
 
     # last 3 completed weeks = 15, 16, 17, all this season
@@ -129,7 +129,7 @@ def test_build_processed_player_stats_never_blends_last3_across_a_season_boundar
         points=[6.0, 12.0, 18.0, 99.0],
     )
 
-    result = build_processed_player_stats(staged, season=2026, week=1)
+    result = build_processed_player_stats(staged, season=2026, week=1, current_player_ids=["00-1"])
     row = result.row(0, named=True)
 
     assert row["games_played_this_season"] == 0
@@ -148,6 +148,21 @@ def test_build_processed_player_stats_never_blends_last3_across_a_season_boundar
     assert row["season"] == 2026 and row["week"] == 1
 
 
+def test_build_processed_player_stats_excludes_players_with_no_current_relevance():
+    """Always fetching the prior season (stats_seasons) must not resurrect retirees
+    or unsigned free agents - only players with a current-season game or a spot in
+    this week's roster/projection universe (current_player_ids) belong in the table.
+    """
+    staged = _weekly_staged(
+        seasons=[2025, 2025, 2025], weeks=[16, 17, 18],
+        points=[6.0, 12.0, 18.0],
+    )
+
+    result = build_processed_player_stats(staged, season=2026, week=1, current_player_ids=[])
+
+    assert result.height == 0
+
+
 def test_build_processed_player_stats_prior_season_last3_is_that_players_own_finish():
     """An injury-shortened prior season (e.g. a torn ACL in week 4) must not be
     padded out with someone else's games - the average covers only what they played.
@@ -157,7 +172,7 @@ def test_build_processed_player_stats_prior_season_last3_is_that_players_own_fin
         points=[7.0, 29.0],
     )
 
-    result = build_processed_player_stats(staged, season=2026, week=1)
+    result = build_processed_player_stats(staged, season=2026, week=1, current_player_ids=["00-1"])
     row = result.row(0, named=True)
 
     assert row["prior_season_games_played"] == 2
@@ -172,7 +187,7 @@ def test_build_processed_player_stats_drops_prior_season_once_three_games_played
         points=[5.0, 5.0, 10.0, 20.0, 30.0],
     )
 
-    result = build_processed_player_stats(staged, season=2026, week=4)
+    result = build_processed_player_stats(staged, season=2026, week=4, current_player_ids=["00-1"])
     row = result.row(0, named=True)
 
     assert row["games_played_this_season"] == 3
@@ -190,7 +205,7 @@ def test_build_processed_player_stats_ignores_postseason_weeks():
         season_types=["REG", "REG", "POST"],
     )
 
-    result = build_processed_player_stats(staged, season=2026, week=1)
+    result = build_processed_player_stats(staged, season=2026, week=1, current_player_ids=["00-1"])
     row = result.row(0, named=True)
 
     assert row["prior_season_avg_fantasy_points"] == 10.0
