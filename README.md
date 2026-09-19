@@ -411,7 +411,8 @@ Recent-form lines never blend across a season boundary (fixed 2026-09-19 — see
 CLAUDE.md Phase 1/2): once a player has 3+ games played this season, only
 this-season numbers appear; earlier in a season, this-season and last-season
 figures are shown as separate, clearly-labeled lines instead of one averaged
-number.
+number. All of these figures are PPR (matching `projected_points`, §9) - never
+the non-PPR fields the processed table also carries.
 
 ```
 PLAYER COMPARISON
