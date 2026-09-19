@@ -4,9 +4,11 @@ import polars as pl
 import pytest
 
 from scripts.refresh_stats import (
+    build_processed,
     build_processed_injuries,
     build_processed_player_stats,
     build_staged_injuries,
+    build_staged_player_stats,
     resolve_target_week,
     stats_seasons,
 )
@@ -80,7 +82,7 @@ def test_stats_seasons_always_includes_the_prior_season():
     assert stats_seasons(2026) == [2025, 2026]
 
 
-def _weekly_staged(seasons, weeks, points, season_types=None):
+def _weekly_staged(seasons, weeks, rec_yards, season_types=None):
     n = len(weeks)
     return pl.DataFrame({
         "player_id": ["00-1"] * n,
@@ -90,62 +92,25 @@ def _weekly_staged(seasons, weeks, points, season_types=None):
         "season": seasons,
         "week": weeks,
         "season_type": season_types or ["REG"] * n,
-        "fantasy_points": points,
-        "fantasy_points_ppr": [p + 3.0 for p in points],
-        "snap_percentage": [0.7] * n,
-        "targets": [5] * n,
-        "carries": [0] * n,
-        "xfp": [10.0] * n,
+        "pass_yards": [0] * n, "pass_tds": [0] * n, "pass_interceptions": [0] * n,
+        "pass_2pt": [0] * n, "rush_yards": [0] * n, "rush_tds": [0] * n,
+        "rush_2pt": [0] * n, "rush_attempts": [0] * n,
+        "receptions": [5] * n, "rec_yards": rec_yards, "rec_tds": [0] * n,
+        "rec_2pt": [0] * n, "fumbles_lost": [0] * n,
     })
 
 
-def test_build_processed_player_stats_excludes_the_target_week():
-    """Week 18 is the decision, so form covers 15-17 - not the game being projected."""
+def test_build_processed_player_stats_returns_one_row_per_completed_game():
+    """Week 18 is the decision - only weeks strictly before it may appear."""
     staged = _weekly_staged(
-        seasons=[2025] * 4, weeks=[15, 16, 17, 18],
-        points=[5.0, 10.0, 15.0, 20.0],
+        seasons=[2025] * 4, weeks=[15, 16, 17, 18], rec_yards=[50, 100, 150, 999],
     )
 
     result = build_processed_player_stats(staged, season=2025, week=18, current_player_ids=["00-1"])
-    row = result.row(0, named=True)
 
-    # last 3 completed weeks = 15, 16, 17, all this season
-    assert row["games_played_this_season"] == 3
-    assert row["avg_fantasy_points_last3"] == 10.0
-    # season to date = weeks 15-17, week 18 hasn't happened
-    assert row["avg_fantasy_points_season"] == 10.0
-    assert row["last_game_fantasy_points"] == 15.0
-    assert row["last_game_season"] == 2025 and row["last_game_week"] == 17
-    # 3+ games this season already - no prior-season reference needed
-    assert row["prior_season_games_played"] == 0
-
-
-def test_build_processed_player_stats_never_blends_last3_across_a_season_boundary():
-    """Week 1 has no completed weeks of its own - "last3" must stay empty, not reach
-    back into last season and silently present a cross-season average as one number.
-    """
-    staged = _weekly_staged(
-        seasons=[2025, 2025, 2025, 2026], weeks=[16, 17, 18, 1],
-        points=[6.0, 12.0, 18.0, 99.0],
-    )
-
-    result = build_processed_player_stats(staged, season=2026, week=1, current_player_ids=["00-1"])
-    row = result.row(0, named=True)
-
-    assert row["games_played_this_season"] == 0
-    assert row["avg_fantasy_points_last3"] is None
-    # season-to-date is the *target* season, which hasn't started
-    assert row["avg_fantasy_points_season"] is None
-
-    # last season is offered separately, never averaged into this season's number
-    assert row["prior_season_games_played"] == 3
-    assert row["prior_season_avg_fantasy_points"] == 12.0
-    assert row["prior_season_last3_avg_fantasy_points"] == 12.0
-
-    # the single most recent game played, regardless of season, with when disclosed
-    assert row["last_game_fantasy_points"] == 18.0
-    assert row["last_game_season"] == 2025 and row["last_game_week"] == 18
-    assert row["season"] == 2026 and row["week"] == 1
+    assert result.height == 3
+    assert sorted(result["week"].to_list()) == [15, 16, 17]
+    assert result.row(0, named=True)["rec_yards"] in (50, 100, 150)
 
 
 def test_build_processed_player_stats_excludes_players_with_no_current_relevance():
@@ -153,64 +118,96 @@ def test_build_processed_player_stats_excludes_players_with_no_current_relevance
     or unsigned free agents - only players with a current-season game or a spot in
     this week's roster/projection universe (current_player_ids) belong in the table.
     """
-    staged = _weekly_staged(
-        seasons=[2025, 2025, 2025], weeks=[16, 17, 18],
-        points=[6.0, 12.0, 18.0],
-    )
+    staged = _weekly_staged(seasons=[2025, 2025, 2025], weeks=[16, 17, 18], rec_yards=[50, 100, 150])
 
     result = build_processed_player_stats(staged, season=2026, week=1, current_player_ids=[])
 
     assert result.height == 0
 
 
-def test_build_processed_player_stats_prior_season_last3_is_that_players_own_finish():
-    """An injury-shortened prior season (e.g. a torn ACL in week 4) must not be
-    padded out with someone else's games - the average covers only what they played.
-    """
-    staged = _weekly_staged(
-        seasons=[2025, 2025], weeks=[1, 2],
-        points=[7.0, 29.0],
-    )
-
-    result = build_processed_player_stats(staged, season=2026, week=1, current_player_ids=["00-1"])
-    row = result.row(0, named=True)
-
-    assert row["prior_season_games_played"] == 2
-    assert row["prior_season_avg_fantasy_points"] == 18.0
-    assert row["prior_season_last3_avg_fantasy_points"] == 18.0
-
-
-def test_build_processed_player_stats_drops_prior_season_once_three_games_played():
-    """Once this season has its own 3-game sample, last season stops mattering."""
-    staged = _weekly_staged(
-        seasons=[2025, 2025, 2026, 2026, 2026], weeks=[17, 18, 1, 2, 3],
-        points=[5.0, 5.0, 10.0, 20.0, 30.0],
-    )
-
-    result = build_processed_player_stats(staged, season=2026, week=4, current_player_ids=["00-1"])
-    row = result.row(0, named=True)
-
-    assert row["games_played_this_season"] == 3
-    assert row["avg_fantasy_points_last3"] == 20.0
-    assert row["avg_fantasy_points_season"] == 20.0
-    # still computed (cheap to keep), but context_builder is what decides not to show it
-    assert row["prior_season_games_played"] == 2
-
-
 def test_build_processed_player_stats_ignores_postseason_weeks():
-    """POST week 19 outranks REG week 18 numerically - it must not count as recent form."""
+    """POST week 19 outranks REG week 18 numerically - it must not appear as a completed game."""
     staged = _weekly_staged(
-        seasons=[2025] * 3, weeks=[17, 18, 19],
-        points=[10.0, 10.0, 40.0],
+        seasons=[2025] * 3, weeks=[17, 18, 19], rec_yards=[50, 50, 999],
         season_types=["REG", "REG", "POST"],
     )
 
     result = build_processed_player_stats(staged, season=2026, week=1, current_player_ids=["00-1"])
-    row = result.row(0, named=True)
 
-    assert row["prior_season_avg_fantasy_points"] == 10.0
-    assert row["last_game_fantasy_points"] == 10.0
-    assert row["last_game_week"] == 18
+    assert result.height == 2
+    assert 19 not in result["week"].to_list()
+
+
+def test_build_staged_player_stats_selects_canonical_scoring_columns():
+    """The 13 ScoringRules-named columns must exist, renamed from nflverse's names."""
+    raw = {
+        "player_stats": pl.DataFrame({
+            "player_id": ["00-1"], "player_display_name": ["Test Player"],
+            "position": ["WR"], "team": ["MIN"], "opponent_team": ["GB"],
+            "season": [2026], "week": [1], "season_type": ["REG"],
+            "targets": [8], "receptions": [6], "carries": [1],
+            "rushing_epa": [0.1], "receiving_epa": [0.2], "passing_epa": [0.0],
+            "target_share": [0.3], "air_yards_share": [0.2],
+            "passing_yards": [0], "passing_tds": [0], "passing_interceptions": [0],
+            "passing_2pt_conversions": [0],
+            "rushing_yards": [5], "rushing_tds": [0], "rushing_2pt_conversions": [0],
+            "receiving_yards": [80], "receiving_tds": [1], "receiving_2pt_conversions": [0],
+            "fumbles_lost_total": [0],
+        }),
+        "snap_counts": pl.DataFrame(schema={"pfr_player_id": pl.String, "season": pl.Int64, "week": pl.Int64, "offense_pct": pl.Float64}),
+        "ff_playerids": pl.DataFrame(schema={"pfr_id": pl.String, "gsis_id": pl.String}),
+        "ff_opportunity": pl.DataFrame(schema={"player_id": pl.String, "season": pl.String, "week": pl.String, "total_fantasy_points_exp": pl.Float64}),
+        "ngs_receiving": pl.DataFrame(schema={"player_gsis_id": pl.String, "season": pl.Int64, "week": pl.Int64, "avg_separation": pl.Float64, "avg_yac_above_expectation": pl.Float64}),
+        "ngs_rushing": pl.DataFrame(schema={"player_gsis_id": pl.String, "season": pl.Int64, "week": pl.Int64, "rush_yards_over_expected_per_att": pl.Float64}),
+        "ngs_passing": pl.DataFrame(schema={"player_gsis_id": pl.String, "season": pl.Int64, "week": pl.Int64, "completion_percentage_above_expectation": pl.Float64, "aggressiveness": pl.Float64}),
+    }
+
+    staged = build_staged_player_stats(raw)
+    row = staged.row(0, named=True)
+
+    assert row["rush_attempts"] == 1  # renamed from "carries"
+    assert row["rec_yards"] == 80 and row["rec_tds"] == 1
+    assert row["fumbles_lost"] == 0
+
+
+def test_build_processed_writes_a_target_season_week_meta_file(tmp_path, monkeypatch):
+    """player_stats.parquet no longer carries a single target season/week per row -
+    a dedicated meta table is the only place that survives the refactor.
+    """
+    monkeypatch.setattr("scripts.refresh_stats.PROCESSED_DIR", tmp_path)
+    # Empty-but-fully-typed stand-ins for staged injuries/projections: build_processed
+    # calls build_processed_injuries/build_processed_projections (unchanged by this
+    # task) which .select() a fixed set of columns via pl.coalesce - even at 0 rows,
+    # polars' select() raises ColumnNotFoundError if a referenced column is absent
+    # from the schema entirely, so a bare {"player_id": pl.String} frame (as a
+    # minimal literal fixture might suggest) isn't enough here.
+    empty_injuries_schema = {
+        "player_id": pl.String, "player_name": pl.String, "full_name": pl.String,
+        "position": pl.String, "position_sleeper": pl.String,
+        "team": pl.String, "team_sleeper": pl.String,
+        "injury_status": pl.String, "report_status": pl.String,
+        "practice_status": pl.String, "practice_participation": pl.String,
+        "date_modified": pl.String, "injury_start_date": pl.String,
+        "injury_notes": pl.String, "report_primary_injury": pl.String,
+    }
+    empty_projections_schema = {
+        "player_id": pl.String, "player_name": pl.String, "player_name_ecr": pl.String,
+        "position": pl.String, "pos": pl.String,
+        "team": pl.String, "team_ecr": pl.String,
+        "season": pl.Int64, "week": pl.Int64,
+        "pts_ppr": pl.Float64, "pts_half_ppr": pl.Float64, "pts_std": pl.Float64,
+        "ecr_rank": pl.Float64, "ecr_position_rank": pl.String,
+    }
+    staged = {
+        "player_stats": _weekly_staged(seasons=[2026], weeks=[1], rec_yards=[10]),
+        "injuries": pl.DataFrame(schema=empty_injuries_schema),
+        "projections": pl.DataFrame(schema=empty_projections_schema),
+    }
+
+    build_processed(staged, season=2026, week=2)
+
+    meta = pl.read_parquet(tmp_path / "meta.parquet")
+    assert meta.row(0, named=True) == {"season": 2026, "week": 2}
 
 
 def test_build_staged_injuries_matches_whitespace_padded_sleeper_ids():
