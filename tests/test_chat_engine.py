@@ -8,38 +8,28 @@ from retrieval.news_retriever import NewsItem
 
 
 def _fixture_tables():
-    player_stats = pl.DataFrame(
-        [
-            {"player_id": "00-love", "player_name": "Jordan Love", "season": 2026, "week": w,
-             "pass_yards": 0, "pass_tds": 0, "pass_interceptions": 0, "pass_2pt": 0,
-             "rush_yards": 0, "rush_tds": 0, "rush_2pt": 0, "rush_attempts": 0,
-             "receptions": 1, "rec_yards": 195, "rec_tds": 0, "rec_2pt": 0, "fumbles_lost": 0}
-            for w in range(1, 5)
+    """Round per-game rates so the math is easy to hand-check: Love = 100
+    rec_yards + 5 receptions/game -> PPR 15.0/game. Goff = 50 rec_yards + 5
+    receptions -> PPR 10.0. Nix = 70 rec_yards + 5 receptions -> PPR 12.0.
+    """
+    player_stats = pl.DataFrame([
+        {"player_id": pid, "player_name": name, "season": 2026, "week": w,
+         "pass_yards": 0, "pass_tds": 0, "pass_interceptions": 0, "pass_2pt": 0,
+         "rush_yards": 0, "rush_tds": 0, "rush_2pt": 0, "rush_attempts": 0,
+         "receptions": 5, "rec_yards": rec_yards, "rec_tds": 0, "rec_2pt": 0, "fumbles_lost": 0}
+        for pid, name, rec_yards in [
+            ("00-love", "Jordan Love", 100), ("00-goff", "Jared Goff", 50), ("00-nix", "Bo Nix", 70),
         ]
-        + [
-            {"player_id": "00-goff", "player_name": "Jared Goff", "season": 2026, "week": w,
-             "pass_yards": 0, "pass_tds": 0, "pass_interceptions": 0, "pass_2pt": 0,
-             "rush_yards": 0, "rush_tds": 0, "rush_2pt": 0, "rush_attempts": 0,
-             "receptions": 1, "rec_yards": 125, "rec_tds": 0, "rec_2pt": 0, "fumbles_lost": 0}
-            for w in range(1, 5)
-        ]
-        + [
-            {"player_id": "00-nix", "player_name": "Bo Nix", "season": 2026, "week": w,
-             "pass_yards": 0, "pass_tds": 0, "pass_interceptions": 0, "pass_2pt": 0,
-             "rush_yards": 0, "rush_tds": 0, "rush_2pt": 0, "rush_attempts": 0,
-             "receptions": 1, "rec_yards": 155, "rec_tds": 0, "rec_2pt": 0, "fumbles_lost": 0}
-            for w in range(1, 5)
-        ]
-    )
+        for w in range(1, 5)
+    ])
     projections = pl.DataFrame({
         "player_id": ["00-love", "00-goff", "00-nix"],
         "player_name": ["Jordan Love", "Jared Goff", "Bo Nix"],
         "week": [5, 5, 5],
         "pass_yards": [0, 0, 0], "pass_tds": [0, 0, 0], "pass_interceptions": [0, 0, 0],
-        "pass_2pt": [0, 0, 0],
-        "rush_yards": [0, 0, 0], "rush_tds": [0, 0, 0], "rush_2pt": [0, 0, 0],
-        "rush_attempts": [0, 0, 0],
-        "receptions": [1, 1, 1], "rec_yards": [161, 133, 150], "rec_tds": [0, 0, 0],
+        "pass_2pt": [0, 0, 0], "rush_yards": [0, 0, 0], "rush_tds": [0, 0, 0],
+        "rush_2pt": [0, 0, 0], "rush_attempts": [0, 0, 0],
+        "receptions": [5, 5, 5], "rec_yards": [80, 60, 70], "rec_tds": [0, 0, 0],
         "rec_2pt": [0, 0, 0], "fumbles_lost": [0, 0, 0],
     })
     injuries = pl.DataFrame({
@@ -91,7 +81,7 @@ def test_chat_builds_context_for_all_resolved_players(stub_run_chat_llm):
     result = chat(
         "Should I start Jordan Love or Jared Goff?",
         mentioned_players=["Jordan Love", "Jared Goff"],
-        week=5,
+        season=2026, week=5,
         tables=_fixture_tables(),
         news_fn=lambda *_: [],
     )
@@ -107,7 +97,7 @@ def test_chat_passes_history_through_to_the_llm(stub_run_chat_llm):
     chat(
         "What about Bo Nix?",
         mentioned_players=["Bo Nix"],
-        week=5,
+        season=2026, week=5,
         history=history,
         tables=_fixture_tables(),
         news_fn=lambda *_: [],
@@ -124,7 +114,7 @@ def test_chat_collects_and_deduplicates_sources_across_players(stub_run_chat_llm
     result = chat(
         "Should I start Jordan Love or Jared Goff?",
         mentioned_players=["Jordan Love", "Jared Goff"],
-        week=5,
+        season=2026, week=5,
         tables=_fixture_tables(),
         news_fn=news_fn,
     )
@@ -143,7 +133,7 @@ def test_chat_passes_through_a_recommendation_when_the_llm_returns_one(monkeypat
     result = chat(
         "Should I start Jordan Love or Jared Goff?",
         mentioned_players=["Jordan Love", "Jared Goff"],
-        week=5,
+        season=2026, week=5,
         tables=_fixture_tables(),
         news_fn=lambda *_: [],
     )
@@ -154,7 +144,7 @@ def test_chat_leaves_recommendation_none_for_a_general_question(stub_run_chat_ll
     result = chat(
         "How many points will Jordan Love score?",
         mentioned_players=["Jordan Love"],
-        week=5,
+        season=2026, week=5,
         tables=_fixture_tables(),
         news_fn=lambda *_: [],
     )
@@ -174,7 +164,7 @@ def test_chat_rejects_a_recommendation_naming_an_undiscussed_player(monkeypatch)
         chat(
             "Should I start Jordan Love or Jared Goff?",
             mentioned_players=["Jordan Love", "Jared Goff"],
-            week=5,
+            season=2026, week=5,
             tables=_fixture_tables(),
             news_fn=lambda *_: [],
         )
@@ -196,7 +186,24 @@ def test_chat_rejects_a_recommendation_starting_and_benching_the_same_player(mon
         chat(
             "Should I start Jordan Love or Jared Goff?",
             mentioned_players=["Jordan Love", "Jared Goff"],
-            week=5,
+            season=2026, week=5,
             tables=_fixture_tables(),
             news_fn=lambda *_: [],
         )
+
+
+def test_chat_passes_scoring_rules_through_to_context(stub_run_chat_llm):
+    from pipeline.scoring import PRESET_STANDARD
+
+    chat(
+        "Should I start Jordan Love or Jared Goff?",
+        mentioned_players=["Jordan Love", "Jared Goff"],
+        season=2026, week=5,
+        tables=_fixture_tables(), news_fn=lambda *_: [],
+        scoring_rules=PRESET_STANDARD,
+    )
+    # Love's PPR season avg would be 15.0 (10.0 rec_yards + 5.0 reception credit).
+    # Standard drops the reception credit entirely - if scoring_rules were being
+    # silently ignored, "15.0" would still show up; it must not.
+    assert "15.0" not in stub_run_chat_llm["context"]
+    assert "10.0 season avg" in stub_run_chat_llm["context"]

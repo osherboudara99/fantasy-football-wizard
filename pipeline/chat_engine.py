@@ -12,10 +12,11 @@ from typing import Callable
 
 import polars as pl
 
-from llm.interface import ChatAnswer, Recommendation, run_chat_llm
+from llm.interface import Recommendation, run_chat_llm
 from pipeline.context_builder import build_context
-from pipeline.decision_engine import DecisionError, resolve_week
+from pipeline.decision_engine import DecisionError, resolve_season, resolve_week
 from pipeline.entity_extraction import extract_players
+from pipeline.scoring import ScoringRules
 from retrieval.news_retriever import NewsItem, retrieve_news
 
 
@@ -76,21 +77,26 @@ def _check_recommendation(recommendation: Recommendation | None, players: list[s
 def chat(
     message: str,
     mentioned_players: list[str] | None = None,
+    season: int | None = None,
     week: int | None = None,
     history: list[dict[str, str]] | None = None,
     tables: dict[str, pl.DataFrame] | None = None,
     news_fn: Callable[[str | None, str], list[NewsItem]] | None = None,
+    scoring_rules: ScoringRules | None = None,
 ) -> ChatResult:
     """Answer any fantasy-football question about the resolved players.
 
     `tables`/`news_fn` are injectable for tests, matching decision_engine.decide().
     `news_fn` defaults to the real Chroma-backed retriever; every NewsItem it
     returns is collected (de-duplicated by link) into the response's sources.
+    `scoring_rules` defaults to full PPR when omitted (build_context's own
+    default) - see docs/superpowers/specs/2026-09-19-custom-league-scoring-design.md.
     """
     mentioned_players = mentioned_players or []
     history = history or []
     players = resolve_chat_players(message, mentioned_players)
     resolved_week = resolve_week(message, week)
+    resolved_season = resolve_season(season)
 
     news_fn = news_fn if news_fn is not None else retrieve_news
     collected: list[NewsItem] = []
@@ -100,7 +106,10 @@ def chat(
         collected.extend(items)
         return items
 
-    context = build_context(players, resolved_week, tables=tables, news_fn=_tracking_news_fn)
+    context = build_context(
+        players, resolved_season, resolved_week,
+        tables=tables, news_fn=_tracking_news_fn, scoring_rules=scoring_rules,
+    )
     answer = run_chat_llm(context, message, history)
     _check_recommendation(answer.recommendation, players)
 
