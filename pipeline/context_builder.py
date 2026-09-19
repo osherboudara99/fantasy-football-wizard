@@ -59,26 +59,67 @@ def _format_injury(injuries: pl.DataFrame, name: str, player_id: str | None) -> 
     return f"{status} -> {practice}" if practice else status
 
 
+def _plural(n: int) -> str:
+    return "" if n == 1 else "s"
+
+
+def _format_recent_form(stats_row: dict) -> list[str]:
+    """This-season form, never blended with last season's numbers.
+
+    Last season only appears once there aren't yet 3 games of this-season data
+    to judge by - once there are, it stops being relevant and is left out.
+    """
+    games_this_season = stats_row["games_played_this_season"]
+    if games_this_season == 0:
+        lines = ["- This season: no games played yet"]
+    elif games_this_season < 3:
+        lines = [
+            f"- This season ({games_this_season} game{_plural(games_this_season)}): "
+            f"{stats_row['avg_fantasy_points_season']:.1f} avg fantasy points"
+        ]
+    else:
+        lines = [
+            f"- This season ({games_this_season} games): "
+            f"{stats_row['avg_fantasy_points_season']:.1f} season avg, "
+            f"{stats_row['avg_fantasy_points_last3']:.1f} avg over last 3 games"
+        ]
+        return lines
+
+    prior_games = stats_row["prior_season_games_played"]
+    if prior_games > 0:
+        finish_n = min(3, prior_games)
+        lines.append(
+            f"- Last season ({prior_games} game{_plural(prior_games)}): "
+            f"{stats_row['prior_season_avg_fantasy_points']:.1f} season avg, "
+            f"{stats_row['prior_season_last3_avg_fantasy_points']:.1f} "
+            f"avg over final {finish_n} game{_plural(finish_n)}"
+        )
+    lines.append(
+        f"- Most recent game played (Week {stats_row['last_game_week']}, "
+        f"{stats_row['last_game_season']}): {stats_row['last_game_fantasy_points']:.1f} pts"
+    )
+    return lines
+
+
 def _format_player(
     name: str,
     week: int,
     tables: dict[str, pl.DataFrame],
     news_fn: Callable[[str | None, str], list[NewsItem]] | None,
 ) -> str:
-    """One player's block: name header, last-3-week avg, projection, injury status, news."""
+    """One player's block: name header, recent form, projection, injury status, news."""
     stats = tables["player_stats"].filter(
         (pl.col("player_name") == name) & (pl.col("week") == week)
     )
     if stats.height == 0:
         raise PlayerNotFoundError(f'No stats found for "{name}" in week {week}')
     stats_row = stats.row(0, named=True)
-    avg_last3 = stats_row["avg_fantasy_points_last3"]
     player_id = stats_row.get("player_id")
 
     proj = _match_player(tables["projections"], name, player_id).filter(pl.col("week") == week)
     projected = proj.row(0, named=True)["projected_points"] if proj.height else None
 
-    lines = [f"{name}:", f"- Avg fantasy points (last 3 weeks): {avg_last3:.1f}"]
+    lines = [f"{name}:", *_format_recent_form(stats_row)]
     if projected is not None:
         lines.append(f"- Projected points: {projected:.1f}")
     lines.append(f"- Injury: {_format_injury(tables['injuries'], name, player_id)}")

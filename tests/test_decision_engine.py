@@ -17,7 +17,10 @@ def _fixture_tables():
     player_stats = pl.DataFrame({
         "player_name": ["Jordan Love", "Jared Goff"],
         "week": [5, 5],
+        "games_played_this_season": [4, 4],
+        "avg_fantasy_points_season": [17.9, 11.8],
         "avg_fantasy_points_last3": [18.4, 12.1],
+        "prior_season_games_played": [0, 0],
     })
     projections = pl.DataFrame({
         "player_name": ["Jordan Love", "Jared Goff"],
