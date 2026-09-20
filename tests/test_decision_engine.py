@@ -9,6 +9,7 @@ from pipeline.decision_engine import (
     DecisionError,
     decide,
     format_decision,
+    is_historical_query,
     resolve_players,
     resolve_season,
     target_season_week,
@@ -242,6 +243,38 @@ def test_resolve_season_prefers_the_explicit_argument(monkeypatch):
 def test_resolve_season_falls_back_to_the_meta_file(monkeypatch):
     monkeypatch.setattr("pipeline.decision_engine.target_season_week", lambda: (2026, 8))
     assert resolve_season(None) == 2026
+
+
+def test_is_historical_query_compares_against_the_real_target(monkeypatch):
+    monkeypatch.setattr("pipeline.decision_engine.target_season_week", lambda: (2026, 8))
+    assert is_historical_query(2026, 5) is True
+    assert is_historical_query(2026, 8) is False
+    assert is_historical_query(2026, 9) is False
+
+
+def test_is_historical_query_returns_none_when_the_target_is_unavailable(monkeypatch):
+    monkeypatch.setattr("pipeline.decision_engine.Path.exists", lambda self: False)
+    assert is_historical_query(2026, 5) is None
+
+
+def test_decide_flags_a_question_as_historical_even_with_no_later_game_for_that_player(
+    monkeypatch, stub_llm
+):
+    """The per-player heuristic in pipeline/player_form.py alone says "not
+    historical" when there's no later row for THIS player - the common case
+    of asking about a player's own most-recently-played week. Comparing
+    against the real target (mocked here to week 8, well past week 4) must
+    still surface the live-data disclaimer.
+    """
+    monkeypatch.setattr("pipeline.decision_engine.target_season_week", lambda: (2026, 8))
+    decide(
+        "Jordan Love or Jared Goff in week 4?",
+        players=["Jordan Love", "Jared Goff"],
+        season=2026, week=4,
+        tables=_fixture_tables(),
+        news_fn=_no_news,
+    )
+    assert "only the real stat line above reflects week 4 itself" in stub_llm["context"]
 
 
 def test_format_decision_renders_the_recommendation_fields():

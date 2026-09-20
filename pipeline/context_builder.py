@@ -94,14 +94,26 @@ def _format_stat_breakdown(stats: dict) -> str:
     return ", ".join(parts) if parts else "no recorded stats"
 
 
-def _format_requested_week(week: int, form: dict) -> list[str]:
+def _format_requested_week(week: int, form: dict, is_historical: bool | None) -> list[str]:
     """The asked-about week's own real stat line (when the player suited up),
-    plus a live-data disclaimer whenever the query itself is historical -
-    gated on `query_is_historical`, not `requested_week_played`: a bye week,
-    an injury, or any week the player sat out is still historical once later
-    games prove time has moved past it, even though there's no stat line for
-    that specific week to show. The normal "ask about the upcoming week"
-    case has neither line, since nothing has happened after it yet.
+    plus a live-data disclaimer whenever the query itself is historical.
+
+    `is_historical` is the caller's authoritative answer (the real target
+    season/week the processed data describes, compared against what was
+    asked) when it has one; `None` means the caller doesn't know (e.g. a
+    unit test calling build_context directly), so this falls back to
+    `form["query_is_historical"]` - a per-player heuristic (does a later row
+    exist for this player) that's usually right but misses one real case: a
+    question about a player's own most-recently-played week, which has no
+    later row for that player even though the actual target week has since
+    moved on. The caller-provided signal takes precedence exactly to cover
+    that gap.
+
+    Not gated on `requested_week_played`: a bye week, an injury, or any week
+    the player sat out is still historical once time has moved past it, even
+    though there's no stat line for that specific week to show. The normal
+    "ask about the upcoming week" case has neither line, since nothing has
+    happened after it yet.
 
     The injuries table keeps no season/week at all (scripts/refresh_stats.py's
     build_processed_injuries drops both), so the "Injury:" line elsewhere in
@@ -114,7 +126,8 @@ def _format_requested_week(week: int, form: dict) -> list[str]:
         lines.append(
             f"- Week {week} actual: {form['requested_week_fantasy_points']:.1f} pts ({breakdown})"
         )
-    if not form["query_is_historical"]:
+    historical = form["query_is_historical"] if is_historical is None else is_historical
+    if not historical:
         return lines
     if form["requested_week_played"]:
         lines.append(
@@ -178,6 +191,7 @@ def _format_player(
     tables: dict[str, pl.DataFrame],
     news_fn: Callable[[str | None, str], list[NewsItem]] | None,
     scoring_rules: ScoringRules,
+    is_historical: bool | None = None,
 ) -> str:
     """One player's block: name header, recent form, projection, injury status, news."""
     player_rows = tables["player_stats"].filter(pl.col("player_name") == name)
@@ -196,7 +210,9 @@ def _format_player(
     )
     projected = compute_fantasy_points(proj_row, scoring_rules) if has_projection else None
 
-    lines = [f"{name}:", *_format_recent_form(form), *_format_requested_week(week, form)]
+    lines = [
+        f"{name}:", *_format_recent_form(form), *_format_requested_week(week, form, is_historical),
+    ]
     if projected is not None:
         lines.append(f"- Projected points: {projected:.1f}")
     lines.append(f"- Injury: {_format_injury(tables['injuries'], name, player_id)}")
@@ -216,6 +232,7 @@ def build_context(
     tables: dict[str, pl.DataFrame] | None = None,
     news_fn: Callable[[str | None, str], list[NewsItem]] | None = None,
     scoring_rules: ScoringRules | None = None,
+    is_historical: bool | None = None,
 ) -> str:
     """Build the §7 PLAYER COMPARISON block for the given players/season/week.
 
@@ -224,11 +241,16 @@ def build_context(
     rows instead of one row per player for a single target week (docs/
     superpowers/specs/2026-09-19-custom-league-scoring-design.md).
     `scoring_rules` defaults to full PPR when omitted, matching this app's
-    long-standing default.
+    long-standing default. `is_historical` is the caller's authoritative
+    answer (comparing the resolved season/week against the real target the
+    processed data describes) for whether this query is about the past;
+    `None` (the default) lets each player's block fall back to its own
+    per-player heuristic - see `_format_requested_week`.
     """
     tables = tables if tables is not None else _load_processed()
     scoring_rules = scoring_rules if scoring_rules is not None else PRESET_PPR
     blocks = [
-        _format_player(name, season, week, tables, news_fn, scoring_rules) for name in players
+        _format_player(name, season, week, tables, news_fn, scoring_rules, is_historical)
+        for name in players
     ]
     return "PLAYER COMPARISON\n\n" + "\n\n".join(blocks)

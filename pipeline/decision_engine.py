@@ -89,6 +89,23 @@ def target_week() -> int:
     return target_season_week()[1]
 
 
+def is_historical_query(season: int, week: int) -> bool | None:
+    """Whether (season, week) is strictly before the real target the
+    processed data describes - the authoritative signal build_context needs
+    to know a query is historical even for a player whose own most recent
+    game IS the asked-about week (no later row for them exists yet, so the
+    per-player fallback heuristic in pipeline/player_form.py would otherwise
+    miss this common case). `None` when the target itself is unavailable
+    (e.g. a fresh checkout with no data refreshed yet) - build_context then
+    falls back to its own per-player heuristic rather than crashing a
+    request that doesn't strictly need this comparison.
+    """
+    try:
+        return (season, week) < target_season_week()
+    except DataUnavailableError:
+        return None
+
+
 def resolve_season(season: int | None) -> int:
     """Explicit season, else whatever the current processed data targets.
 
@@ -168,6 +185,7 @@ def decide(
     context = build_context(
         resolved_players, resolved_season, resolved_week,
         tables=tables, news_fn=news_fn, scoring_rules=scoring_rules,
+        is_historical=is_historical_query(resolved_season, resolved_week),
     )
     recommendation = run_llm(context, question)
     _check_recommendation(recommendation, resolved_players)

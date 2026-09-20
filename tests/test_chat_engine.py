@@ -207,3 +207,21 @@ def test_chat_passes_scoring_rules_through_to_context(stub_run_chat_llm):
     # silently ignored, "15.0" would still show up; it must not.
     assert "15.0" not in stub_run_chat_llm["context"]
     assert "10.0 season avg" in stub_run_chat_llm["context"]
+
+
+def test_chat_flags_a_question_as_historical_even_with_no_later_game_for_that_player(
+    monkeypatch, stub_run_chat_llm
+):
+    """Same gap as decision_engine's equivalent test: the per-player fallback
+    heuristic alone can't tell "most recently played week" apart from "hasn't
+    happened yet" - comparing against the real target (mocked well past the
+    fixture's last played week) must still surface the disclaimer.
+    """
+    monkeypatch.setattr("pipeline.decision_engine.target_season_week", lambda: (2026, 8))
+    chat(
+        "What about Jordan Love in week 4?",
+        mentioned_players=["Jordan Love"],
+        season=2026, week=4,
+        tables=_fixture_tables(), news_fn=lambda *_: [],
+    )
+    assert "only the real stat line above reflects week 4 itself" in stub_run_chat_llm["context"]
