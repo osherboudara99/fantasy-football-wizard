@@ -108,6 +108,7 @@ def _format_player(
     if player_rows.height == 0:
         raise PlayerNotFoundError(f'No stats found for "{name}"')
     player_id = player_rows.row(0, named=True).get("player_id")
+    player_rows = _match_player(player_rows, name, player_id)
     form = compute_recent_form(player_rows, season, scoring_rules)
 
     proj = _match_player(tables["projections"], name, player_id).filter(pl.col("week") == week)

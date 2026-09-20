@@ -173,6 +173,41 @@ def test_build_context_omits_last_season_line_when_player_has_none():
     assert "- Most recent game played (Week 1, 2026): 10.0 pts" in context
 
 
+def _duplicate_display_name_tables():
+    """Two distinct real players share the display name "Byron Young" (confirmed
+    on real data, along with "Jaylon Jones"/"Jordan Phillips"/"Marcus Harris"/
+    "Aaron Brewer"). "00-byron-a" is the first row for that name in the table
+    (2 games this season); "00-byron-b" is a completely different player (3
+    games, same season). A name-only filter would blend both players' rows
+    into one 5-game average - `_format_player` must instead resolve to a
+    single player_id (the first row's, matching `_match_player`'s existing
+    first-row semantics) before computing recent form.
+    """
+    rows = [
+        _game_row("00-byron-a", "Byron Young", 2026, w, receptions=4, rec_yards=60)
+        for w in range(1, 3)
+    ] + [
+        _game_row("00-byron-b", "Byron Young", 2026, w, receptions=4, rec_yards=60)
+        for w in range(1, 4)
+    ]
+    player_stats = pl.DataFrame(rows)
+    projections = pl.DataFrame({"player_id": [], "player_name": [], "week": []}, schema={
+        "player_id": pl.String, "player_name": pl.String, "week": pl.Int64,
+    })
+    injuries = pl.DataFrame({"player_id": [], "player_name": [], "status": [], "practice_level": []})
+    return {"player_stats": player_stats, "projections": projections, "injuries": injuries}
+
+
+def test_build_context_does_not_blend_two_players_sharing_a_display_name():
+    context = build_context(
+        ["Byron Young"], season=2026, week=5, tables=_duplicate_display_name_tables()
+    )
+    # 00-byron-a is the first row for "Byron Young" and has 2 games this season.
+    # Blending both players' rows would report 5 games instead.
+    assert "- This season (2 games)" in context
+    assert "5 games" not in context
+
+
 def test_extract_week_finds_week_number_in_free_text():
     assert extract_week("Should I start Jordan Love in week 5?") == 5
     assert extract_week("who do I play in Week12") == 12
