@@ -21,7 +21,10 @@ RECENCY_WEIGHTING_GUIDANCE = (
     "and say so explicitly (e.g. 'with only one game of current-season data, last season's "
     "usage is still informative here') rather than citing both seasons as if equally strong "
     "evidence. If news describes a change that would make last season's stats stop applying "
-    "(new team, new role, new starter under center), say so and discount them accordingly."
+    "(new team, new role, new starter under center), say so and discount them accordingly. "
+    "If the context includes a note that historical projections/news aren't available for a "
+    "past week, state that limitation plainly in your answer rather than ignoring it or "
+    "answering as if you had the full picture for that week."
 )
 
 SYSTEM_PROMPT = (
