@@ -31,7 +31,9 @@ def _avg_points(rows: pl.DataFrame, rules: ScoringRules) -> float | None:
     return sum(points) / len(points)
 
 
-def compute_recent_form(player_rows: pl.DataFrame, season: int, rules: ScoringRules) -> dict:
+def compute_recent_form(
+    player_rows: pl.DataFrame, season: int, week: int, rules: ScoringRules
+) -> dict:
     """One player's recent-form summary, given all of their completed-game rows.
 
     `player_rows` is expected to already be filtered to completed games for
@@ -39,15 +41,32 @@ def compute_recent_form(player_rows: pl.DataFrame, season: int, rules: ScoringRu
     guarantees both). "Last 3" never blends across the season boundary: this
     season's window only ever contains this season's own rows, even if that's
     0, 1, or 2 games - last season is surfaced separately, never averaged in.
+
+    `week` bounds "this season" to games at or before it, so a question about
+    a past week (e.g. "why did he score well in week 3" asked in week 6)
+    doesn't silently pull in games that, from that week's perspective, hadn't
+    happened yet. For the normal case - asking about the upcoming, not-yet-
+    played week - every game already satisfies `week_col <= week`, so this is
+    a no-op. Prior-season rows are never bounded by `week`: a past season is
+    always fully in the past regardless of which week of the current season
+    was asked about.
     """
-    this_season = player_rows.filter(pl.col("season") == season)
-    prior_season = player_rows.filter(pl.col("season") == season - 1)
+    eligible = player_rows.filter(
+        (pl.col("season") < season) | ((pl.col("season") == season) & (pl.col("week") <= week))
+    )
+    this_season = eligible.filter(pl.col("season") == season)
+    prior_season = eligible.filter(pl.col("season") == season - 1)
 
     this_season_last3 = _own_last_n(this_season, LAST_N_WEEKS)
     prior_season_last3 = _own_last_n(prior_season, LAST_N_WEEKS)
-    most_recent_overall = _own_last_n(player_rows, 1)
+    most_recent_overall = _own_last_n(eligible, 1)
 
     last_game = most_recent_overall.row(0, named=True) if most_recent_overall.height else None
+
+    requested_week_rows = this_season.filter(pl.col("week") == week)
+    requested_week_stats = (
+        requested_week_rows.row(0, named=True) if requested_week_rows.height else None
+    )
 
     return {
         "games_played_this_season": this_season.height,
@@ -61,4 +80,11 @@ def compute_recent_form(player_rows: pl.DataFrame, season: int, rules: ScoringRu
         "last_game_fantasy_points": (
             compute_fantasy_points(last_game, rules) if last_game else None
         ),
+        "requested_week_played": requested_week_stats is not None,
+        "requested_week_fantasy_points": (
+            compute_fantasy_points(requested_week_stats, rules)
+            if requested_week_stats is not None
+            else None
+        ),
+        "requested_week_stats": requested_week_stats,
     }
