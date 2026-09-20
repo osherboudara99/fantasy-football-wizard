@@ -142,10 +142,11 @@ def _format_recent_form(form: dict) -> list[str]:
             f"{form['prior_season_last3_avg_fantasy_points']:.1f} "
             f"avg over final {finish_n} game{_plural(finish_n)}"
         )
-    lines.append(
-        f"- Most recent game played (Week {form['last_game_week']}, "
-        f"{form['last_game_season']}): {form['last_game_fantasy_points']:.1f} pts"
-    )
+    if form["last_game_week"] is not None:
+        lines.append(
+            f"- Most recent game played (Week {form['last_game_week']}, "
+            f"{form['last_game_season']}): {form['last_game_fantasy_points']:.1f} pts"
+        )
     return lines
 
 
@@ -165,7 +166,9 @@ def _format_player(
     player_rows = _match_player(player_rows, name, player_id)
     form = compute_recent_form(player_rows, season, week, scoring_rules)
 
-    proj = _match_player(tables["projections"], name, player_id).filter(pl.col("week") == week)
+    proj = _match_player(tables["projections"], name, player_id).filter(
+        (pl.col("season") == season) & (pl.col("week") == week)
+    )
     proj_row = proj.row(0, named=True) if proj.height else None
     has_projection = proj_row is not None and any(
         proj_row.get(field) is not None for field in ScoringRules.model_fields

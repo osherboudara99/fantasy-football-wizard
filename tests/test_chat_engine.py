@@ -25,7 +25,7 @@ def _fixture_tables():
     projections = pl.DataFrame({
         "player_id": ["00-love", "00-goff", "00-nix"],
         "player_name": ["Jordan Love", "Jared Goff", "Bo Nix"],
-        "week": [5, 5, 5],
+        "season": [2026, 2026, 2026], "week": [5, 5, 5],
         "pass_yards": [0, 0, 0], "pass_tds": [0, 0, 0], "pass_interceptions": [0, 0, 0],
         "pass_2pt": [0, 0, 0], "rush_yards": [0, 0, 0], "rush_tds": [0, 0, 0],
         "rush_2pt": [0, 0, 0], "rush_attempts": [0, 0, 0],

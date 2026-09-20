@@ -130,8 +130,8 @@ def _partial_current_season_tables(games_this_season=1, prior_games=4):
         for w in range(1, 1 + prior_games)
     ]
     player_stats = pl.DataFrame(rows)
-    projections = pl.DataFrame({"player_id": [], "player_name": [], "week": []}, schema={
-        "player_id": pl.String, "player_name": pl.String, "week": pl.Int64,
+    projections = pl.DataFrame({"player_id": [], "player_name": [], "season": [], "week": []}, schema={
+        "player_id": pl.String, "player_name": pl.String, "season": pl.Int64, "week": pl.Int64,
     })
     injuries = pl.DataFrame({"player_id": [], "player_name": [], "status": [], "practice_level": []})
     return {"player_stats": player_stats, "projections": projections, "injuries": injuries}
@@ -191,8 +191,8 @@ def _duplicate_display_name_tables():
         for w in range(1, 4)
     ]
     player_stats = pl.DataFrame(rows)
-    projections = pl.DataFrame({"player_id": [], "player_name": [], "week": []}, schema={
-        "player_id": pl.String, "player_name": pl.String, "week": pl.Int64,
+    projections = pl.DataFrame({"player_id": [], "player_name": [], "season": [], "week": []}, schema={
+        "player_id": pl.String, "player_name": pl.String, "season": pl.Int64, "week": pl.Int64,
     })
     injuries = pl.DataFrame({"player_id": [], "player_name": [], "status": [], "practice_level": []})
     return {"player_stats": player_stats, "projections": projections, "injuries": injuries}
@@ -219,7 +219,7 @@ def _no_real_projection_tables():
         for w in range(1, 4)
     ])
     projections = pl.DataFrame([
-        {"player_id": "00-nabers", "player_name": "Malik Nabers", "week": 5}
+        {"player_id": "00-nabers", "player_name": "Malik Nabers", "season": 2026, "week": 5}
     ])
     injuries = pl.DataFrame({"player_id": [], "player_name": [], "status": [], "practice_level": []})
     return {"player_stats": player_stats, "projections": projections, "injuries": injuries}
@@ -247,8 +247,8 @@ def _multi_week_tables():
         for w in range(4, 7)
     ]
     player_stats = pl.DataFrame(rows)
-    projections = pl.DataFrame({"player_id": [], "player_name": [], "week": []}, schema={
-        "player_id": pl.String, "player_name": pl.String, "week": pl.Int64,
+    projections = pl.DataFrame({"player_id": [], "player_name": [], "season": [], "week": []}, schema={
+        "player_id": pl.String, "player_name": pl.String, "season": pl.Int64, "week": pl.Int64,
     })
     injuries = pl.DataFrame({"player_id": [], "player_name": [], "status": [], "practice_level": []})
     return {"player_stats": player_stats, "projections": projections, "injuries": injuries}
@@ -286,8 +286,8 @@ def test_build_context_pluralizes_stat_labels_correctly():
         )
     ]
     player_stats = pl.DataFrame(rows)
-    projections = pl.DataFrame({"player_id": [], "player_name": [], "week": []}, schema={
-        "player_id": pl.String, "player_name": pl.String, "week": pl.Int64,
+    projections = pl.DataFrame({"player_id": [], "player_name": [], "season": [], "week": []}, schema={
+        "player_id": pl.String, "player_name": pl.String, "season": pl.Int64, "week": pl.Int64,
     })
     injuries = pl.DataFrame({"player_id": [], "player_name": [], "status": [], "practice_level": []})
     tables = {"player_stats": player_stats, "projections": projections, "injuries": injuries}
@@ -299,6 +299,53 @@ def test_build_context_pluralizes_stat_labels_correctly():
     assert "2 fumbles lost" in context
     assert "carrys" not in context
     assert "fumble losts" not in context
+
+
+def _future_debut_tables():
+    """A player whose first career game is week 5 - asking about week 1 (before
+    their debut, with no prior-season rows either) leaves zero eligible games,
+    so `compute_recent_form`'s last_game_* fields are all None. Formatting
+    that "most recent game" line must not crash.
+    """
+    rows = [_game_row("00-rookie", "Late Debut", 2026, 5, receptions=3, rec_yards=40)]
+    player_stats = pl.DataFrame(rows)
+    projections = pl.DataFrame({"player_id": [], "player_name": [], "season": [], "week": []}, schema={
+        "player_id": pl.String, "player_name": pl.String, "season": pl.Int64, "week": pl.Int64,
+    })
+    injuries = pl.DataFrame({"player_id": [], "player_name": [], "status": [], "practice_level": []})
+    return {"player_stats": player_stats, "projections": projections, "injuries": injuries}
+
+
+def test_build_context_handles_a_player_with_no_eligible_games_before_the_asked_week():
+    context = build_context(["Late Debut"], season=2026, week=1, tables=_future_debut_tables())
+
+    assert "This season: no games played yet" in context
+    assert "Most recent game played" not in context
+
+
+def _cross_season_week_collision_tables():
+    """Real projections only ever hold the CURRENT target season's snapshot,
+    but its week number can coincide with a different (past) season's week
+    being asked about via an explicit `season` override. A lookup keyed on
+    `week` alone would attribute season 2026's week-6 projection to a
+    season-2025 week-6 question just because the numbers match.
+    """
+    player_stats = pl.DataFrame([
+        _game_row("00-love", "Jordan Love", 2025, 6, receptions=5, rec_yards=50),
+    ])
+    projections = pl.DataFrame([
+        _game_row("00-love", "Jordan Love", 2026, 6, receptions=5, rec_yards=999),
+    ])
+    injuries = pl.DataFrame({"player_id": [], "player_name": [], "status": [], "practice_level": []})
+    return {"player_stats": player_stats, "projections": projections, "injuries": injuries}
+
+
+def test_build_context_does_not_attribute_a_different_seasons_projection_by_week_number_alone():
+    context = build_context(
+        ["Jordan Love"], season=2025, week=6, tables=_cross_season_week_collision_tables()
+    )
+
+    assert "Projected points" not in context
 
 
 def test_extract_week_finds_week_number_in_free_text():
