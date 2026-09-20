@@ -96,18 +96,23 @@ def _format_stat_breakdown(stats: dict) -> str:
 
 def _format_requested_week(week: int, form: dict) -> list[str]:
     """The asked-about week's own real stat line, plus an explicit note that
-    the app has no historical projection or news data for it - only ever
-    surfaced when that week was actually played (the normal "ask about the
-    upcoming week" case has nothing here, since it hasn't happened yet).
+    nothing else in this block is time-scoped to it - only ever surfaced when
+    that week was actually played (the normal "ask about the upcoming week"
+    case has nothing here, since it hasn't happened yet).
+
+    The injuries table keeps no season/week at all (scripts/refresh_stats.py's
+    build_processed_injuries drops both), so the "Injury:" line elsewhere in
+    this block is always today's live status, never that week's - the note
+    says so explicitly rather than letting it read as period-accurate.
     """
     if not form["requested_week_played"]:
         return []
     breakdown = _format_stat_breakdown(form["requested_week_stats"])
     return [
         f"- Week {week} actual: {form['requested_week_fantasy_points']:.1f} pts ({breakdown})",
-        f"- Note: historical projections and news aren't retained past their week - "
-        f"only the real stat line above is available for week {week}, not what was "
-        f"projected beforehand or what was reported at the time.",
+        f"- Note: only the real stat line above reflects week {week} itself - there's "
+        f"no historical projection for that week, and the injury status and any news "
+        f"shown below are today's, not from back then.",
     ]
 
 

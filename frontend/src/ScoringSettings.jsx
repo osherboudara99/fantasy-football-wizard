@@ -15,7 +15,11 @@ export function loadStoredScoringRules() {
 }
 
 function loadStoredScoringBase() {
-  return localStorage.getItem(STORAGE_BASE_KEY) || 'ppr'
+  try {
+    return localStorage.getItem(STORAGE_BASE_KEY) || 'ppr'
+  } catch {
+    return 'ppr'
+  }
 }
 
 function ScoringSettings({ onRulesChange }) {

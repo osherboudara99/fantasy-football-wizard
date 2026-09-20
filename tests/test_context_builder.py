@@ -262,8 +262,9 @@ def test_build_context_shows_the_asked_about_past_weeks_actual_line():
     assert "25.0" not in context
     assert "- Week 3 actual: 15.0 pts (5 receptions, 100 rec yds)" in context
     assert (
-        "- Note: historical projections and news aren't retained past their week - "
-        "only the real stat line above is available for week 3" in context
+        "- Note: only the real stat line above reflects week 3 itself - there's "
+        "no historical projection for that week, and the injury status and any "
+        "news shown below are today's, not from back then." in context
     )
 
 
@@ -271,7 +272,7 @@ def test_build_context_omits_the_past_week_note_for_the_normal_upcoming_week_que
     context = build_context(["Jordan Love"], season=2026, week=7, tables=_multi_week_tables())
 
     assert "actual:" not in context
-    assert "Note: historical projections" not in context
+    assert "Note: only the real stat line" not in context
 
 
 def test_build_context_pluralizes_stat_labels_correctly():
