@@ -95,6 +95,38 @@ def test_post_scoring_rules_custom_without_a_description_is_a_400():
     assert response.status_code == 400
 
 
+def test_post_scoring_rules_custom_parse_validation_error_is_a_400(monkeypatch):
+    import pydantic
+
+    def fake_parse(base, description):
+        pydantic.TypeAdapter(int).validate_python("not an int")
+
+    monkeypatch.setattr("api.main.parse_custom_scoring_rules", fake_parse)
+
+    response = client.post("/scoring-rules", json={
+        "base": "custom", "base_hint": "ppr", "custom_description": "something nonsensical",
+    })
+
+    assert response.status_code == 400
+
+
+def test_post_scoring_rules_custom_parse_anthropic_error_is_a_502(monkeypatch):
+    import anthropic
+    import httpx
+
+    def fake_parse(base, description):
+        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        raise anthropic.APIError("boom", request=request, body=None)
+
+    monkeypatch.setattr("api.main.parse_custom_scoring_rules", fake_parse)
+
+    response = client.post("/scoring-rules", json={
+        "base": "custom", "base_hint": "ppr", "custom_description": "catches are 0.5",
+    })
+
+    assert response.status_code == 502
+
+
 def test_post_chat_defaults_scoring_rules_to_none_when_omitted(stub_chat):
     client.post("/chat", json={"message": "How's Jordan Love looking?", "mentioned_players": ["Jordan Love"]})
     assert stub_chat["scoring_rules"] is None

@@ -14,6 +14,8 @@ import os
 from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
+import anthropic
+import pydantic
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -220,9 +222,25 @@ def scoring_rules_endpoint(request: Request, rules_request: ScoringRulesRequest)
         raise HTTPException(
             status_code=400, detail="custom_description is required when base is 'custom'."
         )
-    rules = parse_custom_scoring_rules(
-        _SCORING_PRESETS[rules_request.base_hint], rules_request.custom_description
-    )
+    try:
+        rules = parse_custom_scoring_rules(
+            _SCORING_PRESETS[rules_request.base_hint], rules_request.custom_description
+        )
+    except pydantic.ValidationError as exc:
+        # The LLM's output didn't validate as a ScoringRules (e.g. an out-of-range
+        # weight) - the caller's description is the likely cause, not the server.
+        raise HTTPException(
+            status_code=400,
+            detail="Could not parse your scoring description into valid rules - "
+            "try being more specific.",
+        ) from exc
+    except anthropic.APIError as exc:
+        # Anthropic API timeout/outage/error - nothing the caller can fix by
+        # retrying their input, so signal it as an upstream failure instead.
+        raise HTTPException(
+            status_code=502,
+            detail="Scoring rule parsing is temporarily unavailable, try again shortly.",
+        ) from exc
     return ScoringRulesResponse(rules=rules)
 
 
