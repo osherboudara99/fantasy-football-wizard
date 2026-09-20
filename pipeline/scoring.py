@@ -15,6 +15,17 @@ class ScoringRules(BaseModel):
     both nflverse's historical column names and Sleeper's projection keys are
     renamed to these at the staging step (scripts/refresh_stats.py), so
     compute_fantasy_points never needs to know which provider a row came from.
+
+    Known, documented deltas against nflverse's own fantasy_points/
+    fantasy_points_ppr columns (99.67% agreement within 0.11 pts across
+    21,096 real rows, per tests/test_scoring_consistency.py):
+    1. `special_teams_tds` (kick/punt-return touchdowns) has no ScoringRules
+       field, so a return-TD game scores 6 points lower here than nflverse's
+       number. Not in scope to add - a separate future field expansion.
+    2. Canonical `fumbles_lost` maps to nflverse's `fumbles_lost_total`, which
+       includes special-teams/return fumbles, while nflverse's own formula
+       only penalizes offensive (sack/rush/receiving) fumbles lost - a small,
+       arguably-more-correct-for-real-leagues divergence, left as-is.
     """
 
     pass_yards: float = Field(default=0.0, ge=-10, le=10)
