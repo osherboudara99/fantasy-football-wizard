@@ -44,8 +44,14 @@ function ScoringSettings({ onRulesChange }) {
         baseHint,
         customDescription: nextBase === 'custom' ? description : null,
       })
-      localStorage.setItem(STORAGE_RULES_KEY, JSON.stringify(rules))
-      localStorage.setItem(STORAGE_BASE_KEY, nextBase)
+      try {
+        localStorage.setItem(STORAGE_RULES_KEY, JSON.stringify(rules))
+        localStorage.setItem(STORAGE_BASE_KEY, nextBase)
+      } catch {
+        // Persistence is best-effort - a blocked/full store must not stop
+        // rules that were already fetched successfully from being applied
+        // for the rest of this session.
+      }
       setActiveBase(nextBase)
       setFormBase(nextBase)
       onRulesChange(rules)

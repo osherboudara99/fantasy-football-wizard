@@ -115,3 +115,37 @@ def test_compute_recent_form_requested_week_not_played_has_no_stat_line():
     assert form["requested_week_played"] is False
     assert form["requested_week_fantasy_points"] is None
     assert form["requested_week_stats"] is None
+
+
+def test_compute_recent_form_flags_a_bye_week_as_historical_when_later_games_exist():
+    """A bye week (or any week this player didn't suit up for) is still a
+    historical question once later games prove time has moved past it -
+    `requested_week_played` alone can't signal this, since it's False for
+    both "hasn't happened yet" and "happened, but this player sat out".
+    """
+    rows = _rows(seasons=[2026] * 4, weeks=[1, 2, 4, 5], rec_yards=[10, 20, 40, 50])
+    form = compute_recent_form(rows, season=2026, week=3, rules=PRESET_PPR)
+
+    assert form["requested_week_played"] is False
+    assert form["query_is_historical"] is True
+
+
+def test_compute_recent_form_query_is_not_historical_for_the_upcoming_week():
+    """The normal case - asking about the upcoming, not-yet-played week -
+    must not be flagged historical: nothing has happened after it yet.
+    """
+    rows = _rows(seasons=[2026, 2026], weeks=[1, 2], rec_yards=[50, 80])
+    form = compute_recent_form(rows, season=2026, week=5, rules=PRESET_PPR)
+
+    assert form["query_is_historical"] is False
+
+
+def test_compute_recent_form_query_is_historical_when_the_week_was_played():
+    """A played past week (later games exist in the same season) is historical
+    too, not just a bye week - both share the same live-data caveat.
+    """
+    rows = _rows(seasons=[2026] * 5, weeks=[1, 2, 3, 4, 5], rec_yards=[10, 20, 30, 40, 50])
+    form = compute_recent_form(rows, season=2026, week=3, rules=PRESET_PPR)
+
+    assert form["requested_week_played"] is True
+    assert form["query_is_historical"] is True

@@ -68,6 +68,16 @@ def compute_recent_form(
         requested_week_rows.row(0, named=True) if requested_week_rows.height else None
     )
 
+    # A row strictly after the asked-about (season, week) proves time has
+    # moved past it - whether or not THIS player suited up that exact week.
+    # This is the general "is the question historical" signal: it's True for
+    # a played past week AND for a bye/DNP week sandwiched between played
+    # ones, but False for the normal upcoming-week question (nothing exists
+    # after it yet).
+    query_is_historical = player_rows.filter(
+        (pl.col("season") > season) | ((pl.col("season") == season) & (pl.col("week") > week))
+    ).height > 0
+
     return {
         "games_played_this_season": this_season.height,
         "avg_fantasy_points_last3": _avg_points(this_season_last3, rules),
@@ -87,4 +97,5 @@ def compute_recent_form(
             else None
         ),
         "requested_week_stats": requested_week_stats,
+        "query_is_historical": query_is_historical,
     }

@@ -95,25 +95,41 @@ def _format_stat_breakdown(stats: dict) -> str:
 
 
 def _format_requested_week(week: int, form: dict) -> list[str]:
-    """The asked-about week's own real stat line, plus an explicit note that
-    nothing else in this block is time-scoped to it - only ever surfaced when
-    that week was actually played (the normal "ask about the upcoming week"
-    case has nothing here, since it hasn't happened yet).
+    """The asked-about week's own real stat line (when the player suited up),
+    plus a live-data disclaimer whenever the query itself is historical -
+    gated on `query_is_historical`, not `requested_week_played`: a bye week,
+    an injury, or any week the player sat out is still historical once later
+    games prove time has moved past it, even though there's no stat line for
+    that specific week to show. The normal "ask about the upcoming week"
+    case has neither line, since nothing has happened after it yet.
 
     The injuries table keeps no season/week at all (scripts/refresh_stats.py's
     build_processed_injuries drops both), so the "Injury:" line elsewhere in
     this block is always today's live status, never that week's - the note
     says so explicitly rather than letting it read as period-accurate.
     """
-    if not form["requested_week_played"]:
-        return []
-    breakdown = _format_stat_breakdown(form["requested_week_stats"])
-    return [
-        f"- Week {week} actual: {form['requested_week_fantasy_points']:.1f} pts ({breakdown})",
-        f"- Note: only the real stat line above reflects week {week} itself - there's "
-        f"no historical projection for that week, and the injury status and any news "
-        f"shown below are today's, not from back then.",
-    ]
+    lines = []
+    if form["requested_week_played"]:
+        breakdown = _format_stat_breakdown(form["requested_week_stats"])
+        lines.append(
+            f"- Week {week} actual: {form['requested_week_fantasy_points']:.1f} pts ({breakdown})"
+        )
+    if not form["query_is_historical"]:
+        return lines
+    if form["requested_week_played"]:
+        lines.append(
+            f"- Note: only the real stat line above reflects week {week} itself - "
+            f"there's no historical projection for that week, and the injury status "
+            f"and any news shown below are today's, not from back then."
+        )
+    else:
+        lines.append(
+            f"- Note: no recorded stat line for week {week} for this player (bye, "
+            f"injury, or otherwise didn't play) - there's no historical projection "
+            f"for it either, and the injury status and any news shown below are "
+            f"today's, not from back then."
+        )
+    return lines
 
 
 def _format_recent_form(form: dict) -> list[str]:

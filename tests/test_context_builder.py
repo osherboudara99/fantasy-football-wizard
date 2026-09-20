@@ -349,6 +349,36 @@ def test_build_context_does_not_attribute_a_different_seasons_projection_by_week
     assert "Projected points" not in context
 
 
+def _bye_week_tables():
+    """Jordan Love played weeks 1, 2, 4, 5 (bye in week 3). Asking about week
+    3 has no stat line for this player, but later games prove the query is
+    still historical - the live-data disclaimer must appear even without a
+    "Week 3 actual" line to attach it to.
+    """
+    rows = [
+        _game_row("00-love", "Jordan Love", 2026, w, receptions=5, rec_yards=100)
+        for w in [1, 2, 4, 5]
+    ]
+    player_stats = pl.DataFrame(rows)
+    projections = pl.DataFrame({"player_id": [], "player_name": [], "season": [], "week": []}, schema={
+        "player_id": pl.String, "player_name": pl.String, "season": pl.Int64, "week": pl.Int64,
+    })
+    injuries = pl.DataFrame({"player_id": [], "player_name": [], "status": [], "practice_level": []})
+    return {"player_stats": player_stats, "projections": projections, "injuries": injuries}
+
+
+def test_build_context_shows_the_historical_note_on_a_bye_week_with_no_stat_line():
+    context = build_context(["Jordan Love"], season=2026, week=3, tables=_bye_week_tables())
+
+    assert "actual:" not in context
+    assert (
+        "- Note: no recorded stat line for week 3 for this player (bye, injury, or "
+        "otherwise didn't play) - there's no historical projection for it either, "
+        "and the injury status and any news shown below are today's, not from back "
+        "then." in context
+    )
+
+
 def test_extract_week_finds_week_number_in_free_text():
     assert extract_week("Should I start Jordan Love in week 5?") == 5
     assert extract_week("who do I play in Week12") == 12
