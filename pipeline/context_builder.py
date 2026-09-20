@@ -57,6 +57,57 @@ def _plural(n: int) -> str:
     return "" if n == 1 else "s"
 
 
+# (field, display label, is a countable stat vs. a yardage total) - display
+# order groups pass/rush/rec together the way a real stat line reads, rather
+# than following ScoringRules.model_fields' definition order.
+_STAT_LABELS = [
+    ("pass_yards", "pass yds", False),
+    ("pass_tds", "pass TD", True),
+    ("pass_interceptions", "INT", True),
+    ("pass_2pt", "pass 2pt conversion", True),
+    ("rush_attempts", "carry", True),
+    ("rush_yards", "rush yds", False),
+    ("rush_tds", "rush TD", True),
+    ("rush_2pt", "rush 2pt conversion", True),
+    ("receptions", "reception", True),
+    ("rec_yards", "rec yds", False),
+    ("rec_tds", "rec TD", True),
+    ("rec_2pt", "rec 2pt conversion", True),
+    ("fumbles_lost", "fumble lost", True),
+]
+
+
+def _format_stat_breakdown(stats: dict) -> str:
+    parts = []
+    for field, label, countable in _STAT_LABELS:
+        value = stats.get(field)
+        if not value:
+            continue
+        if countable:
+            n = int(value)
+            parts.append(f"{n} {label}{_plural(n)}")
+        else:
+            parts.append(f"{value:g} {label}")
+    return ", ".join(parts) if parts else "no recorded stats"
+
+
+def _format_requested_week(week: int, form: dict) -> list[str]:
+    """The asked-about week's own real stat line, plus an explicit note that
+    the app has no historical projection or news data for it - only ever
+    surfaced when that week was actually played (the normal "ask about the
+    upcoming week" case has nothing here, since it hasn't happened yet).
+    """
+    if not form["requested_week_played"]:
+        return []
+    breakdown = _format_stat_breakdown(form["requested_week_stats"])
+    return [
+        f"- Week {week} actual: {form['requested_week_fantasy_points']:.1f} pts ({breakdown})",
+        f"- Note: historical projections and news aren't retained past their week - "
+        f"only the real stat line above is available for week {week}, not what was "
+        f"projected beforehand or what was reported at the time.",
+    ]
+
+
 def _format_recent_form(form: dict) -> list[str]:
     """This-season form, never blended with last season's numbers.
 
@@ -109,7 +160,7 @@ def _format_player(
         raise PlayerNotFoundError(f'No stats found for "{name}"')
     player_id = player_rows.row(0, named=True).get("player_id")
     player_rows = _match_player(player_rows, name, player_id)
-    form = compute_recent_form(player_rows, season, scoring_rules)
+    form = compute_recent_form(player_rows, season, week, scoring_rules)
 
     proj = _match_player(tables["projections"], name, player_id).filter(pl.col("week") == week)
     proj_row = proj.row(0, named=True) if proj.height else None
@@ -118,7 +169,7 @@ def _format_player(
     )
     projected = compute_fantasy_points(proj_row, scoring_rules) if has_projection else None
 
-    lines = [f"{name}:", *_format_recent_form(form)]
+    lines = [f"{name}:", *_format_recent_form(form), *_format_requested_week(week, form)]
     if projected is not None:
         lines.append(f"- Projected points: {projected:.1f}")
     lines.append(f"- Injury: {_format_injury(tables['injuries'], name, player_id)}")

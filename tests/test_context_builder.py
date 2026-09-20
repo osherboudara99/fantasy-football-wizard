@@ -232,6 +232,48 @@ def test_build_context_omits_projected_points_when_no_real_projection_exists():
     assert "Projected points" not in context
 
 
+def _multi_week_tables():
+    """Jordan Love, 6 games played this season with a scoring jump after week
+    3 (100 rec_yards/game weeks 1-3, 200 rec_yards/game weeks 4-6) - lets a
+    past-week question (week 3) be distinguished from a question about the
+    upcoming week (7, not yet played). PPR: 100 rec_yards + 5 receptions =
+    15.0/game; 200 rec_yards + 5 receptions = 25.0/game.
+    """
+    rows = [
+        _game_row("00-love", "Jordan Love", 2026, w, receptions=5, rec_yards=100)
+        for w in range(1, 4)
+    ] + [
+        _game_row("00-love", "Jordan Love", 2026, w, receptions=5, rec_yards=200)
+        for w in range(4, 7)
+    ]
+    player_stats = pl.DataFrame(rows)
+    projections = pl.DataFrame({"player_id": [], "player_name": [], "week": []}, schema={
+        "player_id": pl.String, "player_name": pl.String, "week": pl.Int64,
+    })
+    injuries = pl.DataFrame({"player_id": [], "player_name": [], "status": [], "practice_level": []})
+    return {"player_stats": player_stats, "projections": projections, "injuries": injuries}
+
+
+def test_build_context_shows_the_asked_about_past_weeks_actual_line():
+    context = build_context(["Jordan Love"], season=2026, week=3, tables=_multi_week_tables())
+
+    # season avg/last3 through week 3 only - week 4-6's 25.0/game must not leak in
+    assert "- This season (3 games): 15.0 season avg, 15.0 avg over last 3 games" in context
+    assert "25.0" not in context
+    assert "- Week 3 actual: 15.0 pts (5 receptions, 100 rec yds)" in context
+    assert (
+        "- Note: historical projections and news aren't retained past their week - "
+        "only the real stat line above is available for week 3" in context
+    )
+
+
+def test_build_context_omits_the_past_week_note_for_the_normal_upcoming_week_question():
+    context = build_context(["Jordan Love"], season=2026, week=7, tables=_multi_week_tables())
+
+    assert "actual:" not in context
+    assert "Note: historical projections" not in context
+
+
 def test_extract_week_finds_week_number_in_free_text():
     assert extract_week("Should I start Jordan Love in week 5?") == 5
     assert extract_week("who do I play in Week12") == 12
