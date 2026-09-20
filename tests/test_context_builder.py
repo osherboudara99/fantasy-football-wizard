@@ -208,6 +208,30 @@ def test_build_context_does_not_blend_two_players_sharing_a_display_name():
     assert "5 games" not in context
 
 
+def _no_real_projection_tables():
+    """A projections row exists for the target week, but every one of the 13
+    canonical stat fields is null/omitted - real Sleeper snapshots commonly
+    have no real number yet for most players. This must render as "no
+    projection", not a false "Projected points: 0.0".
+    """
+    player_stats = pl.DataFrame([
+        _game_row("00-nabers", "Malik Nabers", 2026, w, receptions=4, rec_yards=60)
+        for w in range(1, 4)
+    ])
+    projections = pl.DataFrame([
+        {"player_id": "00-nabers", "player_name": "Malik Nabers", "week": 5}
+    ])
+    injuries = pl.DataFrame({"player_id": [], "player_name": [], "status": [], "practice_level": []})
+    return {"player_stats": player_stats, "projections": projections, "injuries": injuries}
+
+
+def test_build_context_omits_projected_points_when_no_real_projection_exists():
+    context = build_context(
+        ["Malik Nabers"], season=2026, week=5, tables=_no_real_projection_tables()
+    )
+    assert "Projected points" not in context
+
+
 def test_extract_week_finds_week_number_in_free_text():
     assert extract_week("Should I start Jordan Love in week 5?") == 5
     assert extract_week("who do I play in Week12") == 12

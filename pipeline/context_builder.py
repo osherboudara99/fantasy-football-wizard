@@ -112,9 +112,11 @@ def _format_player(
     form = compute_recent_form(player_rows, season, scoring_rules)
 
     proj = _match_player(tables["projections"], name, player_id).filter(pl.col("week") == week)
-    projected = (
-        compute_fantasy_points(proj.row(0, named=True), scoring_rules) if proj.height else None
+    proj_row = proj.row(0, named=True) if proj.height else None
+    has_projection = proj_row is not None and any(
+        proj_row.get(field) is not None for field in ScoringRules.model_fields
     )
+    projected = compute_fantasy_points(proj_row, scoring_rules) if has_projection else None
 
     lines = [f"{name}:", *_format_recent_form(form)]
     if projected is not None:
