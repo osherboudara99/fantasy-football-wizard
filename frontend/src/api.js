@@ -20,7 +20,23 @@ export async function fetchPlayers() {
   return response.json()
 }
 
-export async function fetchChat({ message, mentionedPlayers, week, history }) {
+export async function fetchScoringRules({ base, baseHint, customDescription }) {
+  const response = await fetch(`${API_BASE_URL}/scoring-rules`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      base,
+      base_hint: baseHint ?? 'ppr',
+      custom_description: customDescription ?? null,
+    }),
+  })
+  if (!response.ok) {
+    throw new Error(await parseErrorDetail(response))
+  }
+  return response.json()
+}
+
+export async function fetchChat({ message, mentionedPlayers, week, history, scoringRules }) {
   const response = await fetch(`${API_BASE_URL}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -29,6 +45,7 @@ export async function fetchChat({ message, mentionedPlayers, week, history }) {
       mentioned_players: mentionedPlayers ?? [],
       week: week ?? null,
       history: history ?? [],
+      scoring_rules: scoringRules ?? null,
     }),
   })
   if (!response.ok) {

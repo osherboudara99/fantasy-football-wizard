@@ -67,6 +67,34 @@ button:focus-visible {
   font-size: 14px;
 }
 
+.scoring-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.scoring-options {
+  display: flex;
+  gap: 0.25rem;
+}
+.scoring-option {
+  padding: 0.25rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  background: transparent;
+  cursor: pointer;
+}
+.scoring-option.active {
+  background: #2b6cb0;
+  color: white;
+  border-color: #2b6cb0;
+}
+.scoring-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-width: 320px;
+}
+
 /* Message list */
 
 .message-list {
