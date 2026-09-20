@@ -57,37 +57,40 @@ def _plural(n: int) -> str:
     return "" if n == 1 else "s"
 
 
-# (field, display label, is a countable stat vs. a yardage total) - display
-# order groups pass/rush/rec together the way a real stat line reads, rather
-# than following ScoringRules.model_fields' definition order.
+# (field, singular label, plural label, is a countable stat vs. a yardage
+# total - yardage fields carry no plural label, they're never pluralized).
+# Explicit plural forms rather than label+"s": "carry"/"fumble lost" don't
+# pluralize regularly ("carrys", "fumble losts"). Display order groups pass/
+# rush/rec together the way a real stat line reads, rather than following
+# ScoringRules.model_fields' definition order.
 _STAT_LABELS = [
-    ("pass_yards", "pass yds", False),
-    ("pass_tds", "pass TD", True),
-    ("pass_interceptions", "INT", True),
-    ("pass_2pt", "pass 2pt conversion", True),
-    ("rush_attempts", "carry", True),
-    ("rush_yards", "rush yds", False),
-    ("rush_tds", "rush TD", True),
-    ("rush_2pt", "rush 2pt conversion", True),
-    ("receptions", "reception", True),
-    ("rec_yards", "rec yds", False),
-    ("rec_tds", "rec TD", True),
-    ("rec_2pt", "rec 2pt conversion", True),
-    ("fumbles_lost", "fumble lost", True),
+    ("pass_yards", "pass yds", None, False),
+    ("pass_tds", "pass TD", "pass TDs", True),
+    ("pass_interceptions", "INT", "INTs", True),
+    ("pass_2pt", "pass 2pt conversion", "pass 2pt conversions", True),
+    ("rush_attempts", "carry", "carries", True),
+    ("rush_yards", "rush yds", None, False),
+    ("rush_tds", "rush TD", "rush TDs", True),
+    ("rush_2pt", "rush 2pt conversion", "rush 2pt conversions", True),
+    ("receptions", "reception", "receptions", True),
+    ("rec_yards", "rec yds", None, False),
+    ("rec_tds", "rec TD", "rec TDs", True),
+    ("rec_2pt", "rec 2pt conversion", "rec 2pt conversions", True),
+    ("fumbles_lost", "fumble lost", "fumbles lost", True),
 ]
 
 
 def _format_stat_breakdown(stats: dict) -> str:
     parts = []
-    for field, label, countable in _STAT_LABELS:
+    for field, singular, plural, countable in _STAT_LABELS:
         value = stats.get(field)
         if not value:
             continue
         if countable:
             n = int(value)
-            parts.append(f"{n} {label}{_plural(n)}")
+            parts.append(f"{n} {singular if n == 1 else plural}")
         else:
-            parts.append(f"{value:g} {label}")
+            parts.append(f"{value:g} {singular}")
     return ", ".join(parts) if parts else "no recorded stats"
 
 

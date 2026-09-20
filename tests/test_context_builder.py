@@ -274,6 +274,33 @@ def test_build_context_omits_the_past_week_note_for_the_normal_upcoming_week_que
     assert "Note: historical projections" not in context
 
 
+def test_build_context_pluralizes_stat_labels_correctly():
+    """_format_stat_breakdown's plural forms must be grammatically correct -
+    naive label+'s' produces "carrys" and "fumble losts", which would read as
+    sloppy (or get echoed verbatim) in an LLM-facing answer.
+    """
+    rows = [
+        _game_row(
+            "00-back", "Test Back", 2026, 1,
+            receptions=1, rec_yards=10, rush_attempts=12, rush_yards=50, fumbles_lost=2,
+        )
+    ]
+    player_stats = pl.DataFrame(rows)
+    projections = pl.DataFrame({"player_id": [], "player_name": [], "week": []}, schema={
+        "player_id": pl.String, "player_name": pl.String, "week": pl.Int64,
+    })
+    injuries = pl.DataFrame({"player_id": [], "player_name": [], "status": [], "practice_level": []})
+    tables = {"player_stats": player_stats, "projections": projections, "injuries": injuries}
+
+    context = build_context(["Test Back"], season=2026, week=1, tables=tables)
+
+    assert "12 carries" in context
+    assert "1 reception" in context
+    assert "2 fumbles lost" in context
+    assert "carrys" not in context
+    assert "fumble losts" not in context
+
+
 def test_extract_week_finds_week_number_in_free_text():
     assert extract_week("Should I start Jordan Love in week 5?") == 5
     assert extract_week("who do I play in Week12") == 12
