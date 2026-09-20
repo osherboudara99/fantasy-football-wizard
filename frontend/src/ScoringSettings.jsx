@@ -19,7 +19,13 @@ function loadStoredScoringBase() {
 }
 
 function ScoringSettings({ onRulesChange }) {
-  const [base, setBase] = useState(loadStoredScoringBase())
+  // `activeBase` is the tier actually applied (what onRulesChange last fired
+  // for) - it drives the highlighted button. `formBase` only controls which
+  // panel is expanded. Clicking "Custom" must not highlight it as active
+  // until a save actually succeeds - otherwise the UI would claim Custom is
+  // in effect while chats keep using the previously saved preset underneath.
+  const [activeBase, setActiveBase] = useState(loadStoredScoringBase())
+  const [formBase, setFormBase] = useState(activeBase)
   const [baseHint, setBaseHint] = useState('ppr')
   const [description, setDescription] = useState('')
   const [saving, setSaving] = useState(false)
@@ -36,7 +42,8 @@ function ScoringSettings({ onRulesChange }) {
       })
       localStorage.setItem(STORAGE_RULES_KEY, JSON.stringify(rules))
       localStorage.setItem(STORAGE_BASE_KEY, nextBase)
-      setBase(nextBase)
+      setActiveBase(nextBase)
+      setFormBase(nextBase)
       onRulesChange(rules)
     } catch (err) {
       setError(err.message)
@@ -53,15 +60,15 @@ function ScoringSettings({ onRulesChange }) {
           <button
             key={option}
             type="button"
-            className={base === option ? 'scoring-option active' : 'scoring-option'}
-            onClick={() => (option === 'custom' ? setBase('custom') : save(option))}
+            className={activeBase === option ? 'scoring-option active' : 'scoring-option'}
+            onClick={() => (option === 'custom' ? setFormBase('custom') : save(option))}
             disabled={saving}
           >
             {LABELS[option]}
           </button>
         ))}
       </div>
-      {base === 'custom' && (
+      {formBase === 'custom' && (
         <div className="scoring-custom">
           <select value={baseHint} onChange={(e) => setBaseHint(e.target.value)}>
             <option value="ppr">Based on PPR</option>
@@ -76,6 +83,11 @@ function ScoringSettings({ onRulesChange }) {
           <button type="button" onClick={() => save('custom')} disabled={saving || !description}>
             Save
           </button>
+          {activeBase !== 'custom' && (
+            <p className="scoring-pending-note">
+              Not yet applied - click Save to switch to Custom scoring.
+            </p>
+          )}
         </div>
       )}
       {error && <p className="error">{error}</p>}
