@@ -6,6 +6,8 @@ import anthropic
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
+from pipeline.scoring import ScoringRules
+
 DEFAULT_MODEL = "claude-haiku-4-5"
 
 RECENCY_WEIGHTING_GUIDANCE = (
@@ -107,6 +109,42 @@ def run_llm(context: str, question: str | None = None) -> Recommendation:
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_input}],
         output_format=Recommendation,
+    )
+    return response.parsed_output
+
+
+def parse_custom_scoring_rules(base: ScoringRules, description: str) -> ScoringRules:
+    """Turn a free-text description of league-scoring modifications into a
+    full ScoringRules, seeded from `base` (docs/superpowers/specs/2026-09-19-
+    custom-league-scoring-design.md). Runs once, at settings-save time
+    (POST /scoring-rules) - never per chat message.
+    """
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "ANTHROPIC_API_KEY is not set. Copy .env.example to .env and add your key."
+        )
+    client = anthropic.Anthropic(api_key=api_key)
+    model = os.getenv("ANTHROPIC_MODEL", DEFAULT_MODEL)
+
+    prompt = (
+        "A fantasy football league's base scoring rules are (points per unit):\n"
+        f"{base.model_dump_json(indent=2)}\n\n"
+        "The user describes how their league's rules differ from this base:\n"
+        f'"{description}"\n\n'
+        "Return the full set of scoring rules with only the described "
+        "categories changed - every field the description doesn't mention "
+        "must keep its base value exactly."
+    )
+    response = client.messages.parse(
+        model=model,
+        max_tokens=1024,
+        system=(
+            "You configure fantasy football scoring rules from a user's "
+            "description. Only change what the user actually describes."
+        ),
+        messages=[{"role": "user", "content": prompt}],
+        output_format=ScoringRules,
     )
     return response.parsed_output
 
