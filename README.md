@@ -245,7 +245,6 @@ epa
 ```
 player_name
 week
-projected_points
 source
 ```
 
@@ -546,7 +545,6 @@ UI for interacting with the fantasy assistant.
 **Post-deployment backlog** (raised by the user after the Phase 5 done-check passed, 2026-08-06 — deliberately deferred: ship Phase 5 as-is, deploy per Phase 7, then iterate):
 - Replace the `<select>` player pickers with a searchable/typeahead input — the full player list is too long to scan
 - Add defense/DST options so team defenses can be compared, not just offensive skill players (needs a defense data source — none of the current nflreadpy/Sleeper tables used are wired for DST; scope during implementation)
-- League scoring config (e.g. reception points, custom scoring rules) so projections/recommendations reflect the user's actual league instead of a fixed default
 - Personal branding on the page: the user's name plus links to their LinkedIn and GitHub
 
 ---
