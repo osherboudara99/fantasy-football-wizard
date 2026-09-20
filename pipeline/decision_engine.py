@@ -75,7 +75,12 @@ def target_season_week() -> tuple[int, int]:
         raise DataUnavailableError(
             "data/processed/meta.parquet is missing - run python scripts/refresh_stats.py"
         )
-    row = pl.read_parquet(meta_path).row(0, named=True)
+    df = pl.read_parquet(meta_path)
+    if df.height == 0:
+        raise DataUnavailableError(
+            "data/processed/meta.parquet is empty - run python scripts/refresh_stats.py"
+        )
+    row = df.row(0, named=True)
     return row["season"], row["week"]
 
 

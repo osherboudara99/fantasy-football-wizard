@@ -226,6 +226,14 @@ def test_target_season_week_raises_when_meta_file_is_missing(monkeypatch):
         target_season_week()
 
 
+def test_target_season_week_raises_when_meta_file_is_empty(monkeypatch):
+    empty = pl.DataFrame({"season": [], "week": []})
+    monkeypatch.setattr("pipeline.decision_engine.Path.exists", lambda self: True)
+    monkeypatch.setattr("pipeline.decision_engine.pl.read_parquet", lambda *_: empty)
+    with pytest.raises(DataUnavailableError):
+        target_season_week()
+
+
 def test_resolve_season_prefers_the_explicit_argument(monkeypatch):
     monkeypatch.setattr("pipeline.decision_engine.target_season_week", lambda: (2026, 8))
     assert resolve_season(2025) == 2025
