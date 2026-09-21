@@ -106,6 +106,20 @@ def is_historical_query(season: int, week: int) -> bool | None:
         return None
 
 
+def is_future_query(season: int, week: int) -> bool | None:
+    """Whether (season, week) is strictly after the real target the
+    processed data describes - the app has no prepared projection that far
+    out (only the target week's Sleeper snapshot is ever fetched), so
+    build_context needs this to disclose that a distant-future question is
+    answered from current-form trends only, not a week-specific projection.
+    `None` when the target itself is unavailable, matching is_historical_query.
+    """
+    try:
+        return (season, week) > target_season_week()
+    except DataUnavailableError:
+        return None
+
+
 def resolve_season(season: int | None) -> int:
     """Explicit season, else whatever the current processed data targets.
 
@@ -186,6 +200,7 @@ def decide(
         resolved_players, resolved_season, resolved_week,
         tables=tables, news_fn=news_fn, scoring_rules=scoring_rules,
         is_historical=is_historical_query(resolved_season, resolved_week),
+        is_future=is_future_query(resolved_season, resolved_week),
     )
     recommendation = run_llm(context, question)
     _check_recommendation(recommendation, resolved_players)

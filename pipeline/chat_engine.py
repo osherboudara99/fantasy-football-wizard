@@ -16,6 +16,7 @@ from llm.interface import Recommendation, run_chat_llm
 from pipeline.context_builder import build_context
 from pipeline.decision_engine import (
     DecisionError,
+    is_future_query,
     is_historical_query,
     resolve_season,
     resolve_week,
@@ -115,6 +116,7 @@ def chat(
         players, resolved_season, resolved_week,
         tables=tables, news_fn=_tracking_news_fn, scoring_rules=scoring_rules,
         is_historical=is_historical_query(resolved_season, resolved_week),
+        is_future=is_future_query(resolved_season, resolved_week),
     )
     answer = run_chat_llm(context, message, history)
     _check_recommendation(answer.recommendation, players)

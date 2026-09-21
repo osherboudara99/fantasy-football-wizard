@@ -209,6 +209,19 @@ def test_chat_passes_scoring_rules_through_to_context(stub_run_chat_llm):
     assert "10.0 season avg" in stub_run_chat_llm["context"]
 
 
+def test_chat_flags_a_question_as_future_when_asked_far_beyond_the_target(
+    monkeypatch, stub_run_chat_llm
+):
+    monkeypatch.setattr("pipeline.decision_engine.target_season_week", lambda: (2026, 5))
+    chat(
+        "What about Jordan Love in week 10?",
+        mentioned_players=["Jordan Love"],
+        season=2026, week=10,
+        tables=_fixture_tables(), news_fn=lambda *_: [],
+    )
+    assert "hasn't been prepared yet" in stub_run_chat_llm["context"]
+
+
 def test_chat_flags_a_question_as_historical_even_with_no_later_game_for_that_player(
     monkeypatch, stub_run_chat_llm
 ):

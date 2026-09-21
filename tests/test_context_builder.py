@@ -379,6 +379,21 @@ def test_build_context_shows_the_historical_note_on_a_bye_week_with_no_stat_line
     )
 
 
+def test_build_context_shows_a_note_for_a_week_beyond_the_prepared_data():
+    context = build_context(
+        ["Jordan Love"], season=2026, week=10, tables=_fixture_tables(), is_future=True
+    )
+    assert "Note: week 10 hasn't been prepared yet" in context
+    assert "Projected points" not in context
+
+
+def test_build_context_omits_the_future_note_when_is_future_is_falsy():
+    context = build_context(
+        ["Jordan Love", "Jared Goff"], season=2026, week=5, tables=_fixture_tables()
+    )
+    assert "hasn't been prepared yet" not in context
+
+
 def test_extract_week_finds_week_number_in_free_text():
     assert extract_week("Should I start Jordan Love in week 5?") == 5
     assert extract_week("who do I play in Week12") == 12

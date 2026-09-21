@@ -145,6 +145,30 @@ def _format_requested_week(week: int, form: dict, is_historical: bool | None) ->
     return lines
 
 
+def _format_future_note(week: int, is_future: bool | None) -> list[str]:
+    """A note for a question about a week beyond what the processed data
+    currently covers. Only the target week ever gets a real Sleeper
+    projection fetched (scripts/refresh_stats.py), so a week further out has
+    no prepared projection to show - `_format_player`'s projection lookup
+    already omits it silently, but that alone reads as an ordinary
+    "not projected" player rather than "this week isn't covered yet". This
+    note makes the distinction explicit.
+
+    `is_future` is the caller's authoritative signal (comparing the resolved
+    season/week against the real target); unlike `_format_requested_week`,
+    there's no per-player fallback to compute here (a future week has no
+    rows for anyone), so `None` (target unavailable) simply shows nothing.
+    """
+    if not is_future:
+        return []
+    return [
+        f"- Note: week {week} hasn't been prepared yet - there's no "
+        f"projection for it (only the upcoming target week gets one), so "
+        f"the numbers above reflect current form only, not a "
+        f"week-{week}-specific prediction."
+    ]
+
+
 def _format_recent_form(form: dict) -> list[str]:
     """This-season form, never blended with last season's numbers.
 
@@ -192,6 +216,7 @@ def _format_player(
     news_fn: Callable[[str | None, str], list[NewsItem]] | None,
     scoring_rules: ScoringRules,
     is_historical: bool | None = None,
+    is_future: bool | None = None,
 ) -> str:
     """One player's block: name header, recent form, projection, injury status, news."""
     player_rows = tables["player_stats"].filter(pl.col("player_name") == name)
@@ -212,6 +237,7 @@ def _format_player(
 
     lines = [
         f"{name}:", *_format_recent_form(form), *_format_requested_week(week, form, is_historical),
+        *_format_future_note(week, is_future),
     ]
     if projected is not None:
         lines.append(f"- Projected points: {projected:.1f}")
@@ -233,6 +259,7 @@ def build_context(
     news_fn: Callable[[str | None, str], list[NewsItem]] | None = None,
     scoring_rules: ScoringRules | None = None,
     is_historical: bool | None = None,
+    is_future: bool | None = None,
 ) -> str:
     """Build the §7 PLAYER COMPARISON block for the given players/season/week.
 
@@ -245,12 +272,13 @@ def build_context(
     answer (comparing the resolved season/week against the real target the
     processed data describes) for whether this query is about the past;
     `None` (the default) lets each player's block fall back to its own
-    per-player heuristic - see `_format_requested_week`.
+    per-player heuristic - see `_format_requested_week`. `is_future` is the
+    symmetric signal for a week beyond the target - see `_format_future_note`.
     """
     tables = tables if tables is not None else _load_processed()
     scoring_rules = scoring_rules if scoring_rules is not None else PRESET_PPR
     blocks = [
-        _format_player(name, season, week, tables, news_fn, scoring_rules, is_historical)
+        _format_player(name, season, week, tables, news_fn, scoring_rules, is_historical, is_future)
         for name in players
     ]
     return "PLAYER COMPARISON\n\n" + "\n\n".join(blocks)

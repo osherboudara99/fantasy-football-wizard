@@ -24,7 +24,10 @@ RECENCY_WEIGHTING_GUIDANCE = (
     "(new team, new role, new starter under center), say so and discount them accordingly. "
     "If the context includes a note that historical projections/news aren't available for a "
     "past week, state that limitation plainly in your answer rather than ignoring it or "
-    "answering as if you had the full picture for that week."
+    "answering as if you had the full picture for that week. If the context instead notes "
+    "that a future week hasn't been prepared yet (no projection exists for it), you may "
+    "still reason from current-form trends, but say plainly that you don't have a specific "
+    "projection for that week rather than presenting the trend as if it were one."
 )
 
 SYSTEM_PROMPT = (

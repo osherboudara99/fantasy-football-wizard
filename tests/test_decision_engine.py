@@ -9,6 +9,7 @@ from pipeline.decision_engine import (
     DecisionError,
     decide,
     format_decision,
+    is_future_query,
     is_historical_query,
     resolve_players,
     resolve_season,
@@ -255,6 +256,34 @@ def test_is_historical_query_compares_against_the_real_target(monkeypatch):
 def test_is_historical_query_returns_none_when_the_target_is_unavailable(monkeypatch):
     monkeypatch.setattr("pipeline.decision_engine.Path.exists", lambda self: False)
     assert is_historical_query(2026, 5) is None
+
+
+def test_is_future_query_compares_against_the_real_target(monkeypatch):
+    monkeypatch.setattr("pipeline.decision_engine.target_season_week", lambda: (2026, 5))
+    assert is_future_query(2026, 8) is True
+    assert is_future_query(2026, 5) is False
+    assert is_future_query(2026, 3) is False
+
+
+def test_is_future_query_returns_none_when_the_target_is_unavailable(monkeypatch):
+    monkeypatch.setattr("pipeline.decision_engine.Path.exists", lambda self: False)
+    assert is_future_query(2026, 5) is None
+
+
+def test_decide_flags_a_question_as_future_when_asked_far_beyond_the_target(monkeypatch, stub_llm):
+    """No projection is ever fetched for a week beyond the target - the
+    caller must be told plainly rather than getting a silently-omitted
+    projection that reads like an unprojected-but-otherwise-normal player.
+    """
+    monkeypatch.setattr("pipeline.decision_engine.target_season_week", lambda: (2026, 5))
+    decide(
+        "Jordan Love or Jared Goff in week 10?",
+        players=["Jordan Love", "Jared Goff"],
+        season=2026, week=10,
+        tables=_fixture_tables(),
+        news_fn=_no_news,
+    )
+    assert "hasn't been prepared yet" in stub_llm["context"]
 
 
 def test_decide_flags_a_question_as_historical_even_with_no_later_game_for_that_player(
