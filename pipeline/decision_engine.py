@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 from llm.interface import Recommendation, run_llm
 from pipeline.context_builder import build_context
 from pipeline.entity_extraction import extract_players, extract_week
+from pipeline.scoring import ScoringRules
 from retrieval.news_retriever import retrieve_news
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -60,18 +61,75 @@ def log(msg: str) -> None:
     print(f"[decision_engine] {msg}")
 
 
-def target_week() -> int:
-    """The week the processed data describes - the default when none is asked for.
+def target_season_week() -> tuple[int, int]:
+    """The (season, week) the current processed data targets - the decision
+    in progress. Read from data/processed/meta.parquet, written by
+    refresh_stats.py's build_processed().
 
-    `refresh_stats.py` writes one week at a time and targets the upcoming week, so
-    this is the week being decided about; asking for anything else finds no rows.
+    player_stats.parquet no longer carries a single target season/week per
+    row (it holds many historical per-game rows across two real seasons), so
+    this dedicated meta table is the only place it survives.
     """
-    weeks = pl.read_parquet(PROCESSED_DIR / "player_stats.parquet", columns=["week"])
-    if weeks.height == 0:
+    meta_path = PROCESSED_DIR / "meta.parquet"
+    if not meta_path.exists():
         raise DataUnavailableError(
-            "data/processed/player_stats.parquet is empty - run python scripts/refresh_stats.py"
+            "data/processed/meta.parquet is missing - run python scripts/refresh_stats.py"
         )
-    return int(weeks.get_column("week").max())
+    df = pl.read_parquet(meta_path)
+    if df.height == 0:
+        raise DataUnavailableError(
+            "data/processed/meta.parquet is empty - run python scripts/refresh_stats.py"
+        )
+    row = df.row(0, named=True)
+    return row["season"], row["week"]
+
+
+def target_week() -> int:
+    """The week half of target_season_week() - most callers only override week."""
+    return target_season_week()[1]
+
+
+def is_historical_query(season: int, week: int) -> bool | None:
+    """Whether (season, week) is strictly before the real target the
+    processed data describes - the authoritative signal build_context needs
+    to know a query is historical even for a player whose own most recent
+    game IS the asked-about week (no later row for them exists yet, so the
+    per-player fallback heuristic in pipeline/player_form.py would otherwise
+    miss this common case). `None` when the target itself is unavailable
+    (e.g. a fresh checkout with no data refreshed yet) - build_context then
+    falls back to its own per-player heuristic rather than crashing a
+    request that doesn't strictly need this comparison.
+    """
+    try:
+        return (season, week) < target_season_week()
+    except DataUnavailableError:
+        return None
+
+
+def is_future_query(season: int, week: int) -> bool | None:
+    """Whether (season, week) is strictly after the real target the
+    processed data describes - the app has no prepared projection that far
+    out (only the target week's Sleeper snapshot is ever fetched), so
+    build_context needs this to disclose that a distant-future question is
+    answered from current-form trends only, not a week-specific projection.
+    `None` when the target itself is unavailable, matching is_historical_query.
+    """
+    try:
+        return (season, week) > target_season_week()
+    except DataUnavailableError:
+        return None
+
+
+def resolve_season(season: int | None) -> int:
+    """Explicit season, else whatever the current processed data targets.
+
+    Unlike week, there's no free-text season extraction - nobody types
+    "season 2026" in a start/sit question - so the only override is passing
+    `season` directly.
+    """
+    if season is not None:
+        return season
+    return target_season_week()[0]
 
 
 def resolve_players(question: str, players: list[str] | None) -> list[str]:
@@ -120,21 +178,30 @@ def _check_recommendation(recommendation: Recommendation, players: list[str]) ->
 def decide(
     question: str,
     players: list[str] | None = None,
+    season: int | None = None,
     week: int | None = None,
     tables: dict[str, pl.DataFrame] | None = None,
     news_fn: Callable[[str | None, str], list[str]] | None = None,
+    scoring_rules: ScoringRules | None = None,
 ) -> Decision:
     """Answer a two-player start/sit question end to end.
 
-    `players`/`week` override what the question text says; `tables` lets tests
-    inject fixture DataFrames instead of reading data/processed/. `news_fn`
-    defaults to the real Chroma-backed retriever (README §6.2); tests that don't
-    care about news can pass a stub to stay hermetic.
+    `players`/`season`/`week` override what the question text says (season
+    has no text-extraction path - see resolve_season); `tables` lets tests
+    inject fixture DataFrames instead of reading data/processed/.
+    `scoring_rules` defaults to full PPR when omitted (build_context's own
+    default) - see docs/superpowers/specs/2026-09-19-custom-league-scoring-design.md.
     """
     resolved_players = resolve_players(question, players)
     resolved_week = resolve_week(question, week)
+    resolved_season = resolve_season(season)
     news_fn = news_fn if news_fn is not None else retrieve_news
-    context = build_context(resolved_players, resolved_week, tables=tables, news_fn=news_fn)
+    context = build_context(
+        resolved_players, resolved_season, resolved_week,
+        tables=tables, news_fn=news_fn, scoring_rules=scoring_rules,
+        is_historical=is_historical_query(resolved_season, resolved_week),
+        is_future=is_future_query(resolved_season, resolved_week),
+    )
     recommendation = run_llm(context, question)
     _check_recommendation(recommendation, resolved_players)
     return Decision(
@@ -173,6 +240,7 @@ def main() -> None:
         "--players", nargs=REQUIRED_PLAYERS, default=None,
         help="the two player names, bypassing entity extraction",
     )
+    parser.add_argument("--season", type=int, default=None)
     parser.add_argument("--week", type=int, default=None)
     parser.add_argument("--show-context", action="store_true", help="print the LLM context too")
     args = parser.parse_args()
@@ -184,7 +252,7 @@ def main() -> None:
     question = args.question or (
         f"Who should I start, {args.players[0]} or {args.players[1]}?"
     )
-    decision = decide(question, players=args.players, week=args.week)
+    decision = decide(question, players=args.players, season=args.season, week=args.week)
 
     if args.show_context:
         log("context sent to the LLM:")

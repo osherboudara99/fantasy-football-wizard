@@ -4,33 +4,45 @@ from pydantic import ValidationError
 
 from llm.interface import Recommendation
 from pipeline.decision_engine import (
+    DataUnavailableError,
     Decision,
     DecisionError,
     decide,
     format_decision,
+    is_future_query,
+    is_historical_query,
     resolve_players,
+    resolve_season,
+    target_season_week,
     target_week,
 )
 
 
 def _fixture_tables():
-    player_stats = pl.DataFrame({
-        "player_name": ["Jordan Love", "Jared Goff"],
-        "week": [5, 5],
-        "games_played_this_season": [4, 4],
-        "avg_fantasy_points_ppr_season": [17.9, 11.8],
-        "avg_fantasy_points_ppr_last3": [18.4, 12.1],
-        "prior_season_games_played": [0, 0],
-    })
+    player_stats = pl.DataFrame([
+        {"player_id": "00-love", "player_name": "Jordan Love", "season": 2026, "week": w,
+         "pass_yards": 0, "pass_tds": 0, "pass_interceptions": 0, "pass_2pt": 0,
+         "rush_yards": 0, "rush_tds": 0, "rush_2pt": 0, "rush_attempts": 0,
+         "receptions": 1, "rec_yards": 195, "rec_tds": 0, "rec_2pt": 0, "fumbles_lost": 0}
+        for w in range(1, 5)
+    ] + [
+        {"player_id": "00-goff", "player_name": "Jared Goff", "season": 2026, "week": w,
+         "pass_yards": 0, "pass_tds": 0, "pass_interceptions": 0, "pass_2pt": 0,
+         "rush_yards": 0, "rush_tds": 0, "rush_2pt": 0, "rush_attempts": 0,
+         "receptions": 1, "rec_yards": 125, "rec_tds": 0, "rec_2pt": 0, "fumbles_lost": 0}
+        for w in range(1, 5)
+    ])
     projections = pl.DataFrame({
-        "player_name": ["Jordan Love", "Jared Goff"],
-        "week": [5, 5],
-        "projected_points": [17.1, 14.3],
+        "player_id": ["00-love", "00-goff"], "player_name": ["Jordan Love", "Jared Goff"],
+        "season": [2026, 2026], "week": [5, 5],
+        "pass_yards": [0, 0], "pass_tds": [0, 0], "pass_interceptions": [0, 0], "pass_2pt": [0, 0],
+        "rush_yards": [0, 0], "rush_tds": [0, 0], "rush_2pt": [0, 0], "rush_attempts": [0, 0],
+        "receptions": [1, 1], "rec_yards": [161, 133], "rec_tds": [0, 0], "rec_2pt": [0, 0],
+        "fumbles_lost": [0, 0],
     })
     injuries = pl.DataFrame({
-        "player_name": ["Jordan Love"],
-        "status": ["Questionable"],
-        "practice_level": ["Full practice Friday"],
+        "player_id": ["00-love"], "player_name": ["Jordan Love"],
+        "status": ["Questionable"], "practice_level": ["Full practice Friday"],
     })
     return {"player_stats": player_stats, "projections": projections, "injuries": injuries}
 
@@ -67,7 +79,8 @@ def stub_llm(monkeypatch):
 def test_decide_passes_built_context_and_question_to_the_llm(stub_llm):
     question = "Should I start Jordan Love or Jared Goff in week 5?"
     decision = decide(
-        question, tables=_fixture_tables(), players=["Jordan Love", "Jared Goff"], news_fn=_no_news
+        question, tables=_fixture_tables(), players=["Jordan Love", "Jared Goff"],
+        season=2026, news_fn=_no_news,
     )
 
     assert isinstance(decision, Decision)
@@ -87,6 +100,7 @@ def test_decide_extracts_players_and_week_from_the_question(monkeypatch, stub_ll
     decision = decide(
         "Who do I start in week 5, Jared Goff or Jordan Love?",
         tables=_fixture_tables(),
+        season=2026,
         news_fn=_no_news,
     )
 
@@ -96,7 +110,7 @@ def test_decide_extracts_players_and_week_from_the_question(monkeypatch, stub_ll
 
 def test_decide_falls_back_to_target_week_when_question_has_none(monkeypatch, stub_llm):
     """A question without "week N" uses whatever week the processed data holds."""
-    monkeypatch.setattr("pipeline.decision_engine.target_week", lambda: 5)
+    monkeypatch.setattr("pipeline.decision_engine.target_season_week", lambda: (2026, 5))
     decision = decide(
         "Jordan Love or Jared Goff?",
         players=["Jordan Love", "Jared Goff"],
@@ -115,6 +129,7 @@ def test_explicit_week_overrides_the_question_text(monkeypatch, stub_llm):
     decision = decide(
         "Jordan Love or Jared Goff in week 5?",
         players=["Jordan Love", "Jared Goff"],
+        season=2026,
         week=9,
         tables=tables,
         news_fn=_no_news,
@@ -132,6 +147,7 @@ def test_week_zero_in_the_question_is_not_swallowed_by_the_fallback(monkeypatch,
     decision = decide(
         "Jordan Love or Jared Goff in week 0?",
         players=["Jordan Love", "Jared Goff"],
+        season=2026,
         tables=tables,
         news_fn=_no_news,
     )
@@ -150,6 +166,7 @@ def test_decide_defaults_news_fn_to_the_real_retriever(monkeypatch, stub_llm):
     decide(
         "Jordan Love or Jared Goff in week 5?",
         players=["Jordan Love", "Jared Goff"],
+        season=2026,
         tables=_fixture_tables(),
     )
 
@@ -169,6 +186,7 @@ def test_decide_rejects_a_recommendation_about_other_players(monkeypatch):
         decide(
             "Jordan Love or Jared Goff in week 5?",
             players=["Jordan Love", "Jared Goff"],
+            season=2026,
             tables=_fixture_tables(),
             news_fn=_no_news,
         )
@@ -196,17 +214,96 @@ def test_resolve_players_rejects_the_same_player_twice():
         resolve_players("some question", ["Jordan Love", "jordan love "])
 
 
-def test_target_week_reads_the_max_week_in_processed_stats(monkeypatch):
-    fixture = pl.DataFrame({"week": [16, 18, 17]})
-    monkeypatch.setattr("pipeline.decision_engine.pl.read_parquet", lambda *_, **__: fixture)
-    assert target_week() == 18
+def test_target_season_week_reads_the_meta_file(monkeypatch):
+    fixture = pl.DataFrame({"season": [2026], "week": [8]})
+    monkeypatch.setattr("pipeline.decision_engine.Path.exists", lambda self: True)
+    monkeypatch.setattr("pipeline.decision_engine.pl.read_parquet", lambda *_: fixture)
+    assert target_season_week() == (2026, 8)
+    assert target_week() == 8
 
 
-def test_target_week_raises_on_empty_processed_stats(monkeypatch):
-    empty = pl.DataFrame({"week": []}, schema={"week": pl.Int32})
-    monkeypatch.setattr("pipeline.decision_engine.pl.read_parquet", lambda *_, **__: empty)
-    with pytest.raises(DecisionError):
-        target_week()
+def test_target_season_week_raises_when_meta_file_is_missing(monkeypatch):
+    monkeypatch.setattr("pipeline.decision_engine.Path.exists", lambda self: False)
+    with pytest.raises(DataUnavailableError):
+        target_season_week()
+
+
+def test_target_season_week_raises_when_meta_file_is_empty(monkeypatch):
+    empty = pl.DataFrame({"season": [], "week": []})
+    monkeypatch.setattr("pipeline.decision_engine.Path.exists", lambda self: True)
+    monkeypatch.setattr("pipeline.decision_engine.pl.read_parquet", lambda *_: empty)
+    with pytest.raises(DataUnavailableError):
+        target_season_week()
+
+
+def test_resolve_season_prefers_the_explicit_argument(monkeypatch):
+    monkeypatch.setattr("pipeline.decision_engine.target_season_week", lambda: (2026, 8))
+    assert resolve_season(2025) == 2025
+
+
+def test_resolve_season_falls_back_to_the_meta_file(monkeypatch):
+    monkeypatch.setattr("pipeline.decision_engine.target_season_week", lambda: (2026, 8))
+    assert resolve_season(None) == 2026
+
+
+def test_is_historical_query_compares_against_the_real_target(monkeypatch):
+    monkeypatch.setattr("pipeline.decision_engine.target_season_week", lambda: (2026, 8))
+    assert is_historical_query(2026, 5) is True
+    assert is_historical_query(2026, 8) is False
+    assert is_historical_query(2026, 9) is False
+
+
+def test_is_historical_query_returns_none_when_the_target_is_unavailable(monkeypatch):
+    monkeypatch.setattr("pipeline.decision_engine.Path.exists", lambda self: False)
+    assert is_historical_query(2026, 5) is None
+
+
+def test_is_future_query_compares_against_the_real_target(monkeypatch):
+    monkeypatch.setattr("pipeline.decision_engine.target_season_week", lambda: (2026, 5))
+    assert is_future_query(2026, 8) is True
+    assert is_future_query(2026, 5) is False
+    assert is_future_query(2026, 3) is False
+
+
+def test_is_future_query_returns_none_when_the_target_is_unavailable(monkeypatch):
+    monkeypatch.setattr("pipeline.decision_engine.Path.exists", lambda self: False)
+    assert is_future_query(2026, 5) is None
+
+
+def test_decide_flags_a_question_as_future_when_asked_far_beyond_the_target(monkeypatch, stub_llm):
+    """No projection is ever fetched for a week beyond the target - the
+    caller must be told plainly rather than getting a silently-omitted
+    projection that reads like an unprojected-but-otherwise-normal player.
+    """
+    monkeypatch.setattr("pipeline.decision_engine.target_season_week", lambda: (2026, 5))
+    decide(
+        "Jordan Love or Jared Goff in week 10?",
+        players=["Jordan Love", "Jared Goff"],
+        season=2026, week=10,
+        tables=_fixture_tables(),
+        news_fn=_no_news,
+    )
+    assert "hasn't been prepared yet" in stub_llm["context"]
+
+
+def test_decide_flags_a_question_as_historical_even_with_no_later_game_for_that_player(
+    monkeypatch, stub_llm
+):
+    """The per-player heuristic in pipeline/player_form.py alone says "not
+    historical" when there's no later row for THIS player - the common case
+    of asking about a player's own most-recently-played week. Comparing
+    against the real target (mocked here to week 8, well past week 4) must
+    still surface the live-data disclaimer.
+    """
+    monkeypatch.setattr("pipeline.decision_engine.target_season_week", lambda: (2026, 8))
+    decide(
+        "Jordan Love or Jared Goff in week 4?",
+        players=["Jordan Love", "Jared Goff"],
+        season=2026, week=4,
+        tables=_fixture_tables(),
+        news_fn=_no_news,
+    )
+    assert "only the real stat line above reflects week 4 itself" in stub_llm["context"]
 
 
 def test_format_decision_renders_the_recommendation_fields():

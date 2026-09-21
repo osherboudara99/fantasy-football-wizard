@@ -13,6 +13,7 @@ from llm.interface import Recommendation
 from pipeline.chat_engine import ChatResult, NoPlayersFoundError
 from pipeline.context_builder import PlayerNotFoundError
 from pipeline.decision_engine import DataUnavailableError, DecisionError
+from pipeline.scoring import PRESET_PPR, PRESET_STANDARD, ScoringRules
 from retrieval.news_retriever import NewsItem
 
 client = TestClient(app)
@@ -47,14 +48,98 @@ def stub_chat(monkeypatch):
     """Replace the pipeline call so the endpoint is tested without an API call."""
     calls = {}
 
-    def fake_chat(message, mentioned_players=None, week=None, history=None, **_):
+    def fake_chat(message, mentioned_players=None, season=None, week=None, history=None, scoring_rules=None, **_):
         calls.update(
-            message=message, mentioned_players=mentioned_players, week=week, history=history
+            message=message, mentioned_players=mentioned_players, season=season,
+            week=week, history=history, scoring_rules=scoring_rules,
         )
         return _fixture_chat_result()
 
     monkeypatch.setattr("api.main.chat", fake_chat)
     return calls
+
+
+def test_post_scoring_rules_returns_the_matching_preset_without_an_llm_call(monkeypatch):
+    def _fail_if_called(*_a, **_k):
+        raise AssertionError("parse_custom_scoring_rules must not be called for a built-in preset")
+
+    monkeypatch.setattr("api.main.parse_custom_scoring_rules", _fail_if_called)
+
+    response = client.post("/scoring-rules", json={"base": "half_ppr"})
+
+    assert response.status_code == 200
+    assert response.json()["rules"]["receptions"] == pytest.approx(0.5)
+
+
+def test_post_scoring_rules_custom_calls_the_parser_with_the_chosen_base_hint(monkeypatch):
+    calls = {}
+
+    def fake_parse(base, description):
+        calls.update(base=base, description=description)
+        return base.model_copy(update={"receptions": 0.5})
+
+    monkeypatch.setattr("api.main.parse_custom_scoring_rules", fake_parse)
+
+    response = client.post("/scoring-rules", json={
+        "base": "custom", "base_hint": "ppr", "custom_description": "catches are 0.5",
+    })
+
+    assert response.status_code == 200
+    assert response.json()["rules"]["receptions"] == pytest.approx(0.5)
+    assert calls["base"] == PRESET_PPR
+    assert calls["description"] == "catches are 0.5"
+
+
+def test_post_scoring_rules_custom_without_a_description_is_a_400():
+    response = client.post("/scoring-rules", json={"base": "custom"})
+    assert response.status_code == 400
+
+
+def test_post_scoring_rules_custom_parse_validation_error_is_a_400(monkeypatch):
+    import pydantic
+
+    def fake_parse(base, description):
+        pydantic.TypeAdapter(int).validate_python("not an int")
+
+    monkeypatch.setattr("api.main.parse_custom_scoring_rules", fake_parse)
+
+    response = client.post("/scoring-rules", json={
+        "base": "custom", "base_hint": "ppr", "custom_description": "something nonsensical",
+    })
+
+    assert response.status_code == 400
+
+
+def test_post_scoring_rules_custom_parse_anthropic_error_is_a_502(monkeypatch):
+    import anthropic
+    import httpx
+
+    def fake_parse(base, description):
+        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        raise anthropic.APIError("boom", request=request, body=None)
+
+    monkeypatch.setattr("api.main.parse_custom_scoring_rules", fake_parse)
+
+    response = client.post("/scoring-rules", json={
+        "base": "custom", "base_hint": "ppr", "custom_description": "catches are 0.5",
+    })
+
+    assert response.status_code == 502
+
+
+def test_post_chat_defaults_scoring_rules_to_none_when_omitted(stub_chat):
+    client.post("/chat", json={"message": "How's Jordan Love looking?", "mentioned_players": ["Jordan Love"]})
+    assert stub_chat["scoring_rules"] is None
+
+
+def test_post_chat_passes_through_an_explicit_scoring_rules_payload(stub_chat):
+    payload = PRESET_STANDARD.model_dump()
+    client.post("/chat", json={
+        "message": "How's Jordan Love looking?",
+        "mentioned_players": ["Jordan Love"],
+        "scoring_rules": payload,
+    })
+    assert stub_chat["scoring_rules"] == ScoringRules(**payload)
 
 
 def test_post_chat_returns_the_answer_as_json(stub_chat):

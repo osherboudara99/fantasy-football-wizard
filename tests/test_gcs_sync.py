@@ -40,11 +40,12 @@ def test_sync_from_gcs_downloads_processed_parquet_files(tmp_path, monkeypatch):
         "data/processed/player_stats.parquet",
         "data/processed/projections.parquet",
         "data/processed/injuries.parquet",
+        "data/processed/meta.parquet",
     ])
 
     sync_from_gcs("my-bucket", client=_FakeClient(bucket))
 
-    for filename in ["player_stats.parquet", "projections.parquet", "injuries.parquet"]:
+    for filename in ["player_stats.parquet", "projections.parquet", "injuries.parquet", "meta.parquet"]:
         assert (tmp_path / "processed" / filename).read_bytes() == f"data/processed/{filename}".encode()
 
 
@@ -55,6 +56,7 @@ def test_sync_from_gcs_downloads_the_full_chroma_directory_tree(tmp_path, monkey
         "data/processed/player_stats.parquet",
         "data/processed/projections.parquet",
         "data/processed/injuries.parquet",
+        "data/processed/meta.parquet",
         "embeddings/chroma_db/chroma.sqlite3",
         "embeddings/chroma_db/abcd-1234/data_level0.bin",
     ])
@@ -72,6 +74,7 @@ def test_sync_from_gcs_uses_the_named_bucket(tmp_path, monkeypatch):
         "data/processed/player_stats.parquet",
         "data/processed/projections.parquet",
         "data/processed/injuries.parquet",
+        "data/processed/meta.parquet",
     ])
     seen = {}
 
@@ -94,6 +97,7 @@ def test_sync_from_gcs_rejects_a_blob_name_that_escapes_chroma_dir(tmp_path, mon
         "data/processed/player_stats.parquet",
         "data/processed/projections.parquet",
         "data/processed/injuries.parquet",
+        "data/processed/meta.parquet",
         "embeddings/chroma_db/../../escaped.txt",
     ])
 

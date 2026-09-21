@@ -14,6 +14,8 @@ import os
 from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
+import anthropic
+import pydantic
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,11 +25,13 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 
+from llm.interface import parse_custom_scoring_rules
 from pipeline.chat_engine import NoPlayersFoundError, chat
 from pipeline.context_builder import PlayerNotFoundError
 from pipeline.decision_engine import DataUnavailableError, DecisionError
 from pipeline.entity_extraction import known_player_names
 from pipeline.gcs_sync import sync_from_gcs
+from pipeline.scoring import PRESET_HALF_PPR, PRESET_PPR, PRESET_STANDARD, ScoringRules
 
 # The frontend is a separate origin in dev (Vite on 5173) and in prod (Cloudflare
 # Pages), so the allowed origins have to be configurable per deployment.
@@ -131,15 +135,34 @@ class ChatTurn(BaseModel):
     content: Annotated[str, StringConstraints(max_length=MAX_QUESTION_LENGTH)]
 
 
+_SCORING_PRESETS = {"ppr": PRESET_PPR, "half_ppr": PRESET_HALF_PPR, "standard": PRESET_STANDARD}
+
+
+class ScoringRulesRequest(BaseModel):
+    base: Literal["ppr", "half_ppr", "standard", "custom"]
+    base_hint: Literal["ppr", "half_ppr", "standard"] = "ppr"
+    custom_description: Annotated[str, StringConstraints(max_length=MAX_QUESTION_LENGTH)] | None = None
+
+
+class ScoringRulesResponse(BaseModel):
+    rules: ScoringRules
+
+
 class ChatRequest(BaseModel):
     message: Annotated[str, StringConstraints(max_length=MAX_QUESTION_LENGTH)]
     mentioned_players: list[Annotated[str, StringConstraints(max_length=MAX_PLAYER_NAME_LENGTH)]] = (
         Field(default_factory=list, max_length=MAX_MENTIONED_PLAYERS)
     )
+    season: int | None = Field(
+        default=None, description="Defaults to the season the processed data targets"
+    )
     week: int | None = Field(
         default=None, description="Defaults to the week the processed data describes"
     )
     history: list[ChatTurn] = Field(default_factory=list, max_length=MAX_HISTORY_TURNS)
+    scoring_rules: ScoringRules | None = Field(
+        default=None, description="Defaults to full PPR when omitted"
+    )
 
 
 class SourceItem(BaseModel):
@@ -185,6 +208,42 @@ def players() -> list[str]:
         raise HTTPException(status_code=503, detail=DATA_UNAVAILABLE_DETAIL) from exc
 
 
+@app.post("/scoring-rules", response_model=ScoringRulesResponse)
+@limiter.limit(CHAT_RATE_LIMIT)
+def scoring_rules_endpoint(request: Request, rules_request: ScoringRulesRequest) -> ScoringRulesResponse:
+    """Resolve a scoring tier to its weights - a preset directly, or a Custom
+    description parsed once by the LLM. The frontend saves the *result* to
+    localStorage and sends it with every /chat call, so this never runs per
+    chat message (README §14 / custom-league-scoring design spec).
+    """
+    if rules_request.base != "custom":
+        return ScoringRulesResponse(rules=_SCORING_PRESETS[rules_request.base])
+    if not rules_request.custom_description:
+        raise HTTPException(
+            status_code=400, detail="custom_description is required when base is 'custom'."
+        )
+    try:
+        rules = parse_custom_scoring_rules(
+            _SCORING_PRESETS[rules_request.base_hint], rules_request.custom_description
+        )
+    except pydantic.ValidationError as exc:
+        # The LLM's output didn't validate as a ScoringRules (e.g. an out-of-range
+        # weight) - the caller's description is the likely cause, not the server.
+        raise HTTPException(
+            status_code=400,
+            detail="Could not parse your scoring description into valid rules - "
+            "try being more specific.",
+        ) from exc
+    except anthropic.APIError as exc:
+        # Anthropic API timeout/outage/error - nothing the caller can fix by
+        # retrying their input, so signal it as an upstream failure instead.
+        raise HTTPException(
+            status_code=502,
+            detail="Scoring rule parsing is temporarily unavailable, try again shortly.",
+        ) from exc
+    return ScoringRulesResponse(rules=rules)
+
+
 @app.post("/chat", response_model=ChatResponse)
 @limiter.limit(CHAT_RATE_LIMIT)
 def chat_endpoint(request: Request, chat_request: ChatRequest) -> ChatResponse:
@@ -198,8 +257,10 @@ def chat_endpoint(request: Request, chat_request: ChatRequest) -> ChatResponse:
         result = chat(
             chat_request.message,
             mentioned_players=chat_request.mentioned_players,
+            season=chat_request.season,
             week=chat_request.week,
             history=[turn.model_dump() for turn in chat_request.history],
+            scoring_rules=chat_request.scoring_rules,
         )
     except NoPlayersFoundError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

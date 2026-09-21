@@ -245,7 +245,6 @@ epa
 ```
 player_name
 week
-projected_points
 source
 ```
 
@@ -411,8 +410,12 @@ Recent-form lines never blend across a season boundary (fixed 2026-09-19 — see
 CLAUDE.md Phase 1/2): once a player has 3+ games played this season, only
 this-season numbers appear; earlier in a season, this-season and last-season
 figures are shown as separate, clearly-labeled lines instead of one averaged
-number. All of these figures are PPR (matching `projected_points`, §9) - never
-the non-PPR fields the processed table also carries.
+number. All of these figures (season avg, last-3 avg, projected points) are
+computed on demand from raw per-game stat counts (`pipeline/scoring.py`'s
+`compute_fantasy_points()`) under whichever scoring tier the request selected
+— they are **not** always PPR; see §7a below for the tiers and how a caller
+picks one. The same players/week can produce three different sets of numbers
+here depending on that choice.
 
 ```
 PLAYER COMPARISON
@@ -433,6 +436,31 @@ Malik Nabers:
 
 
 ```
+
+### 7a. League Scoring Tiers
+
+Fantasy points are never pre-computed and stored — `data/processed/player_stats.parquet`
+and `projections.parquet` hold raw per-game stat counts (`pass_yards`, `receptions`,
+`rec_tds`, etc.), and `pipeline/scoring.py`'s `compute_fantasy_points()` applies a
+`ScoringRules` weight set to them at request time. Four tiers:
+
+- **PPR** (`PRESET_PPR`) — 1 point per reception
+- **Half-PPR** (`PRESET_HALF_PPR`) — 0.5 points per reception
+- **Standard** (`PRESET_STANDARD`) — 0 points per reception
+- **Custom** — any other weights, described in plain English (e.g. "catches are
+  worth 0.5 points instead of 1, and a TD is 8 points") and parsed by an LLM call
+
+`POST /scoring-rules` (`api/main.py`) turns a base tier — plus, for `custom`, a
+`custom_description` and a `base_hint` tier to start from — into a full
+`ScoringRules` JSON object: `llm/interface.py`'s `parse_custom_scoring_rules()`
+starts from the hinted preset and only overrides the fields the description
+actually calls out, leaving every other field exactly as that preset defines it.
+`POST /chat` accepts the resulting `scoring_rules` object and threads it through
+`decide()` → `build_context()` → `compute_recent_form()`/`compute_fantasy_points()`,
+so every number in the context block — and any recommendation built from it —
+reflects the caller's actual league scoring. The frontend exposes this as a
+scoring-tier toggle that calls `/scoring-rules` once and attaches the result to
+subsequent `/chat` requests.
 
 
 ---
@@ -517,7 +545,6 @@ UI for interacting with the fantasy assistant.
 **Post-deployment backlog** (raised by the user after the Phase 5 done-check passed, 2026-08-06 — deliberately deferred: ship Phase 5 as-is, deploy per Phase 7, then iterate):
 - Replace the `<select>` player pickers with a searchable/typeahead input — the full player list is too long to scan
 - Add defense/DST options so team defenses can be compared, not just offensive skill players (needs a defense data source — none of the current nflreadpy/Sleeper tables used are wired for DST; scope during implementation)
-- League scoring config (e.g. reception points, custom scoring rules) so projections/recommendations reflect the user's actual league instead of a fixed default
 - Personal branding on the page: the user's name plus links to their LinkedIn and GitHub
 
 ---
