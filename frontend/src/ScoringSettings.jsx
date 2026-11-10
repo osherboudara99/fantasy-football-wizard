@@ -3,6 +3,8 @@ import { fetchScoringRules } from './api'
 
 const STORAGE_RULES_KEY = 'ffw_scoring_rules'
 const STORAGE_BASE_KEY = 'ffw_scoring_base'
+const STORAGE_CUSTOM_DESCRIPTION_KEY = 'ffw_scoring_custom_description'
+const STORAGE_CUSTOM_BASE_HINT_KEY = 'ffw_scoring_custom_base_hint'
 const LABELS = { ppr: 'PPR', half_ppr: 'Half-PPR', standard: 'Standard', custom: 'Custom' }
 
 export function loadStoredScoringRules() {
@@ -22,6 +24,22 @@ function loadStoredScoringBase() {
   }
 }
 
+function loadStoredCustomDescription() {
+  try {
+    return localStorage.getItem(STORAGE_CUSTOM_DESCRIPTION_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+function loadStoredCustomBaseHint() {
+  try {
+    return localStorage.getItem(STORAGE_CUSTOM_BASE_HINT_KEY) || 'ppr'
+  } catch {
+    return 'ppr'
+  }
+}
+
 function ScoringSettings({ onRulesChange }) {
   // `activeBase` is the tier actually applied (what onRulesChange last fired
   // for) - it drives the highlighted button. `formBase` only controls which
@@ -30,8 +48,8 @@ function ScoringSettings({ onRulesChange }) {
   // in effect while chats keep using the previously saved preset underneath.
   const [activeBase, setActiveBase] = useState(loadStoredScoringBase())
   const [formBase, setFormBase] = useState(activeBase)
-  const [baseHint, setBaseHint] = useState('ppr')
-  const [description, setDescription] = useState('')
+  const [baseHint, setBaseHint] = useState(loadStoredCustomBaseHint())
+  const [description, setDescription] = useState(loadStoredCustomDescription())
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
 
@@ -47,6 +65,10 @@ function ScoringSettings({ onRulesChange }) {
       try {
         localStorage.setItem(STORAGE_RULES_KEY, JSON.stringify(rules))
         localStorage.setItem(STORAGE_BASE_KEY, nextBase)
+        if (nextBase === 'custom') {
+          localStorage.setItem(STORAGE_CUSTOM_DESCRIPTION_KEY, description)
+          localStorage.setItem(STORAGE_CUSTOM_BASE_HINT_KEY, baseHint)
+        }
       } catch {
         // Persistence is best-effort - a blocked/full store must not stop
         // rules that were already fetched successfully from being applied
