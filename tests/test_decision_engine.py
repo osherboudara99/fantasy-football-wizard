@@ -173,6 +173,26 @@ def test_decide_defaults_news_fn_to_the_real_retriever(monkeypatch, stub_llm):
     assert {name for _, name in calls} == {"Jordan Love", "Jared Goff"}
 
 
+def test_decide_passes_scoring_rules_through_to_context(stub_llm):
+    """chat() has an equivalent test (test_chat_passes_scoring_rules_through_to_context);
+    decide() builds context the same way, but had no test proving scoring_rules
+    actually reaches build_context on this path rather than only chat()'s.
+    """
+    from pipeline.scoring import PRESET_STANDARD
+
+    decide(
+        "Should I start Jordan Love or Jared Goff in week 5?",
+        players=["Jordan Love", "Jared Goff"],
+        season=2026, tables=_fixture_tables(), news_fn=_no_news,
+        scoring_rules=PRESET_STANDARD,
+    )
+    # Love's PPR season avg would be 20.5 (19.5 rec_yards + 1.0 reception credit).
+    # Standard drops the reception credit entirely - if scoring_rules were being
+    # silently ignored, "20.5" would still show up; it must not.
+    assert "20.5" not in stub_llm["context"]
+    assert "19.5 season avg" in stub_llm["context"]
+
+
 def test_decide_rejects_a_recommendation_about_other_players(monkeypatch):
     """A hallucinated name must fail loudly instead of rendering as a real answer."""
     monkeypatch.setattr(
