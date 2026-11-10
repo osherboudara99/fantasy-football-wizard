@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from 'react'
 import { fetchChat, fetchPlayers } from './api'
 import ChatInput from './ChatInput'
 import MessageBubble from './MessageBubble'
+import ScoringSettings, { loadStoredScoringRules } from './ScoringSettings'
 import './App.css'
 
 function App() {
   const [players, setPlayers] = useState([])
   const [playersError, setPlayersError] = useState(null)
   const [week, setWeek] = useState('')
+  const [scoringRules, setScoringRules] = useState(loadStoredScoringRules())
   const [messages, setMessages] = useState([])
   const [submitting, setSubmitting] = useState(false)
   const scrollRef = useRef(null)
@@ -33,6 +35,7 @@ function App() {
         mentionedPlayers,
         week: week ? Number(week) : null,
         history,
+        scoringRules,
       })
       setMessages((prev) => [
         ...prev,
@@ -58,6 +61,7 @@ function App() {
           <h1>Fantasy Football Wizard</h1>
           <p className="subtitle">Ask about start/sit, trades, or any player.</p>
         </div>
+        <ScoringSettings onRulesChange={setScoringRules} />
         <label className="week-label" title="Optional — defaults to the upcoming week">
           Week
           <input

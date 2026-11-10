@@ -15,7 +15,7 @@ from google.cloud import storage
 from pipeline.context_builder import PROCESSED_DIR
 from retrieval.news_retriever import CHROMA_DIR
 
-PROCESSED_FILES = ["player_stats.parquet", "projections.parquet", "injuries.parquet"]
+PROCESSED_FILES = ["player_stats.parquet", "projections.parquet", "injuries.parquet", "meta.parquet"]
 CHROMA_PREFIX = "embeddings/chroma_db/"
 
 
