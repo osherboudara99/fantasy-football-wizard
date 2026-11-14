@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A conversational decision-support tool for fantasy football. It combines structured NFL stats/projections with RAG over fantasy news to answer start/sit, flex, and trade questions in a chat interface, with cited sources. (Revised 2026-09-09 — originally scoped as "not a chatbot"; the user decided a chat interface covering more question types is the direction going forward. Design: `docs/superpowers/specs/2026-09-09-chat-assistant-design.md`.)
 
-**Non-goals (v1)**: draft strategy (deferred — needs new ADP/rankings data, explicitly saved for a later task, not dropped), waiver wire optimization, DFS/betting advice, full-season simulations. Trade evaluation is now in scope (removed from non-goals 2026-09-09) — it reuses the existing stats/news context with no dedicated value model.
+**Non-goals (v1)**: draft strategy (deferred — needs new ADP/rankings data, explicitly saved for a later task, not dropped), waiver wire optimization, DFS/betting advice, full-season simulations. Trade evaluation is now in scope (removed from non-goals 2026-09-09) — it reuses the existing stats/news context with no dedicated value model. Roster-photo lineup assistant (upload a screenshot of your ESPN/Sleeper roster, get start/sit and full-lineup-optimization answers against it) is also deferred, not dropped — design brainstormed 2026-11-14 in `docs/superpowers/specs/2026-11-14-roster-photo-lineup-design.md`, scheduled after Phase 7/8.
 
 ## Source of Truth
 
