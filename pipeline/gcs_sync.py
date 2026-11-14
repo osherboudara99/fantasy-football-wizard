@@ -66,3 +66,27 @@ def sync_from_gcs(bucket_name: str, client: storage.Client | None = None) -> Non
         destination.parent.mkdir(parents=True, exist_ok=True)
         blob.download_to_filename(str(destination))
     log(f"downloaded {len(blobs)} chroma_db files")
+
+
+def sync_to_gcs(bucket_name: str, client: storage.Client | None = None) -> None:
+    """Upload data/processed/*.parquet and the Chroma index to `bucket_name`.
+
+    Called by the refresh job (scripts/refresh_job_entrypoint.py) after it
+    regenerates everything locally. Mirrors sync_from_gcs's layout exactly, so
+    the API's next sync sees whatever this just produced. Uploads every
+    *.parquet file actually present under PROCESSED_DIR rather than a fixed
+    list, since it may include tables sync_from_gcs never reads back (e.g.
+    news.parquet, only ever consumed by embeddings/build_embeddings.py).
+    """
+    client = client if client is not None else storage.Client()
+    bucket = client.bucket(bucket_name)
+
+    for path in sorted(PROCESSED_DIR.glob("*.parquet")):
+        bucket.blob(f"data/processed/{path.name}").upload_from_filename(str(path))
+    log("uploaded data/processed/*.parquet")
+
+    chroma_files = [p for p in sorted(CHROMA_DIR.rglob("*")) if p.is_file()]
+    for path in chroma_files:
+        relative = path.relative_to(CHROMA_DIR)
+        bucket.blob(f"{CHROMA_PREFIX}{relative.as_posix()}").upload_from_filename(str(path))
+    log(f"uploaded {len(chroma_files)} chroma_db files")

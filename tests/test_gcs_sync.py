@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from pipeline.gcs_sync import UnsafeBlobPathError, sync_from_gcs
+from pipeline.gcs_sync import UnsafeBlobPathError, sync_from_gcs, sync_to_gcs
 
 
 class _FakeBlob:
@@ -26,6 +26,31 @@ class _FakeBucket:
 
 
 class _FakeClient:
+    def __init__(self, bucket):
+        self._bucket = bucket
+
+    def bucket(self, name):
+        return self._bucket
+
+
+class _FakeUploadBlob:
+    def __init__(self, name):
+        self.name = name
+        self.uploaded_from = None
+
+    def upload_from_filename(self, path):
+        self.uploaded_from = path
+
+
+class _FakeUploadBucket:
+    def __init__(self):
+        self.blobs: dict[str, _FakeUploadBlob] = {}
+
+    def blob(self, name):
+        return self.blobs.setdefault(name, _FakeUploadBlob(name))
+
+
+class _FakeUploadClient:
     def __init__(self, bucket):
         self._bucket = bucket
 
@@ -105,3 +130,37 @@ def test_sync_from_gcs_rejects_a_blob_name_that_escapes_chroma_dir(tmp_path, mon
         sync_from_gcs("my-bucket", client=_FakeClient(bucket))
 
     assert not (tmp_path / "escaped.txt").exists()
+
+
+def test_sync_to_gcs_uploads_every_processed_parquet_file(tmp_path, monkeypatch):
+    processed = tmp_path / "processed"
+    processed.mkdir()
+    (processed / "player_stats.parquet").write_bytes(b"a")
+    (processed / "news.parquet").write_bytes(b"b")
+    monkeypatch.setattr("pipeline.gcs_sync.PROCESSED_DIR", processed)
+    monkeypatch.setattr("pipeline.gcs_sync.CHROMA_DIR", tmp_path / "chroma_db")
+
+    bucket = _FakeUploadBucket()
+    sync_to_gcs("my-bucket", client=_FakeUploadClient(bucket))
+
+    assert set(bucket.blobs) == {"data/processed/player_stats.parquet", "data/processed/news.parquet"}
+    assert bucket.blobs["data/processed/player_stats.parquet"].uploaded_from == str(
+        processed / "player_stats.parquet"
+    )
+
+
+def test_sync_to_gcs_uploads_the_full_chroma_directory_tree(tmp_path, monkeypatch):
+    chroma = tmp_path / "chroma_db"
+    (chroma / "abcd-1234").mkdir(parents=True)
+    (chroma / "chroma.sqlite3").write_bytes(b"x")
+    (chroma / "abcd-1234" / "data_level0.bin").write_bytes(b"y")
+    monkeypatch.setattr("pipeline.gcs_sync.PROCESSED_DIR", tmp_path / "processed")
+    monkeypatch.setattr("pipeline.gcs_sync.CHROMA_DIR", chroma)
+
+    bucket = _FakeUploadBucket()
+    sync_to_gcs("my-bucket", client=_FakeUploadClient(bucket))
+
+    assert set(bucket.blobs) == {
+        "embeddings/chroma_db/chroma.sqlite3",
+        "embeddings/chroma_db/abcd-1234/data_level0.bin",
+    }
