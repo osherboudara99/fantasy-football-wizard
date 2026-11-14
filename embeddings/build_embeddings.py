@@ -4,10 +4,15 @@ Usage:
     python -m embeddings.build_embeddings
 
 Reads data/processed/news.parquet (written by scripts/refresh_news.py), embeds
-each tagged article-player row with sentence-transformers, and upserts it into
-the `news` collection at embeddings/chroma_db/. Embedding only ever runs here,
-never in the API request path (README §13) - keeps torch out of the API image
-and the request path fast.
+each tagged article-player row, and upserts it into the `news` collection at
+embeddings/chroma_db/. Embedding only ever runs here, never in the API request
+path (README §13).
+
+Uses chromadb's bundled ONNX embedding function (same all-MiniLM-L6-v2 model,
+via onnxruntime) rather than sentence-transformers - onnxruntime is already a
+transitive dep of chromadb itself, so this needs no extra heavy dependency and
+no torch, keeping the refresh job's own image lean too (it previously pulled
+in torch just for this).
 """
 from __future__ import annotations
 
@@ -16,13 +21,12 @@ from pathlib import Path
 
 import chromadb
 import polars as pl
-from sentence_transformers import SentenceTransformer
+from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 PROCESSED_DIR = DATA_DIR / "processed"
 CHROMA_DIR = Path(__file__).resolve().parent / "chroma_db"
 COLLECTION_NAME = "news"
-EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
 
 def log(msg: str) -> None:
@@ -56,13 +60,15 @@ def _row_metadata(row: dict) -> dict:
 def build_embeddings(
     news: pl.DataFrame | None = None,
     client=None,
-    model: SentenceTransformer | None = None,
+    embedding_fn=None,
 ) -> int:
     """Embed every tagged news row and upsert it into the Chroma `news` collection.
 
-    Returns the number of rows embedded. `news`/`client`/`model` are injectable
-    so tests can pass a fixture DataFrame, an in-memory Chroma client, and a stub
-    encoder instead of touching disk or downloading a real model.
+    Returns the number of rows embedded. `news`/`client`/`embedding_fn` are
+    injectable so tests can pass a fixture DataFrame, an in-memory Chroma
+    client, and a stub encoder instead of touching disk or downloading a real
+    model. `embedding_fn` takes a list of strings and returns a list of vectors
+    (chromadb's `EmbeddingFunction` call signature).
     """
     news = news if news is not None else pl.read_parquet(PROCESSED_DIR / "news.parquet")
     if news.height == 0:
@@ -71,13 +77,16 @@ def build_embeddings(
 
     client = client if client is not None else chromadb.PersistentClient(path=str(CHROMA_DIR))
     collection = client.get_or_create_collection(COLLECTION_NAME)
-    model = model if model is not None else SentenceTransformer(EMBEDDING_MODEL)
+    embedding_fn = embedding_fn if embedding_fn is not None else DefaultEmbeddingFunction()
 
     rows = news.to_dicts()
     ids = [_row_id(r) for r in rows]
     documents = [_row_text(r) for r in rows]
-    embeddings = model.encode(documents)
-    embeddings = embeddings.tolist() if hasattr(embeddings, "tolist") else list(embeddings)
+    # chromadb's EmbeddingFunction protocol returns a list of numpy arrays (one
+    # per document) - upsert() accepts that natively, no float conversion needed
+    # (wrapping each one in list() would unpack it into a list of np.float32
+    # scalars, which upsert's own validation rejects).
+    embeddings = embedding_fn(documents)
     metadatas = [_row_metadata(r) for r in rows]
 
     collection.upsert(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)

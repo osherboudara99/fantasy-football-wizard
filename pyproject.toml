@@ -32,7 +32,6 @@ refresh = [
   "nflreadpy",
   "requests",
   "beautifulsoup4",
-  "sentence-transformers",
   "google-cloud-run>=0.16.3",
 ]
 dev = [

@@ -9,11 +9,9 @@ import embeddings.build_embeddings as build_embeddings_module
 from embeddings.build_embeddings import build_embeddings
 
 
-class _StubModel:
-    """Deterministic stand-in for SentenceTransformer.encode - no real model load."""
-
-    def encode(self, texts):
-        return [[float(len(t) % 7), float(sum(map(ord, t)) % 11), 1.0] for t in texts]
+def _stub_embedding_fn(texts):
+    """Deterministic stand-in for a real EmbeddingFunction - no model download."""
+    return [[float(len(t) % 7), float(sum(map(ord, t)) % 11), 1.0] for t in texts]
 
 
 @pytest.fixture
@@ -42,14 +40,14 @@ def _news_fixture():
 def test_build_embeddings_returns_zero_for_empty_news(isolated_collection_name):
     client = chromadb.EphemeralClient()
     count = build_embeddings(
-        news=pl.DataFrame(schema=_news_fixture().schema), client=client, model=_StubModel()
+        news=pl.DataFrame(schema=_news_fixture().schema), client=client, embedding_fn=_stub_embedding_fn
     )
     assert count == 0
 
 
 def test_build_embeddings_upserts_one_row_per_article_with_metadata(isolated_collection_name):
     client = chromadb.EphemeralClient()
-    count = build_embeddings(news=_news_fixture(), client=client, model=_StubModel())
+    count = build_embeddings(news=_news_fixture(), client=client, embedding_fn=_stub_embedding_fn)
     assert count == 1
 
     collection = client.get_or_create_collection(isolated_collection_name)
@@ -65,8 +63,8 @@ def test_build_embeddings_upserts_one_row_per_article_with_metadata(isolated_col
 
 def test_build_embeddings_upsert_is_idempotent_on_rerun(isolated_collection_name):
     client = chromadb.EphemeralClient()
-    build_embeddings(news=_news_fixture(), client=client, model=_StubModel())
-    build_embeddings(news=_news_fixture(), client=client, model=_StubModel())
+    build_embeddings(news=_news_fixture(), client=client, embedding_fn=_stub_embedding_fn)
+    build_embeddings(news=_news_fixture(), client=client, embedding_fn=_stub_embedding_fn)
 
     collection = client.get_or_create_collection(isolated_collection_name)
     assert collection.count() == 1
