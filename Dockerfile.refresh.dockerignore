@@ -1,0 +1,27 @@
+# Overrides .dockerignore for `docker build -f Dockerfile.refresh` (BuildKit
+# picks this file over .dockerignore by name match) - the refresh image needs
+# scripts/ and embeddings/*.py that the API's .dockerignore excludes.
+
+.git/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Generated at runtime by the refresh job itself - never bake in stale data
+# or a local embeddings index.
+data/
+embeddings/chroma_db/
+
+.env
+
+# Not needed by the refresh image.
+api/
+frontend/
+tests/
+notebooks/
+*.ipynb
+AGENT_GOALS.md
+PROGRESS_LOG.md
+README.md
