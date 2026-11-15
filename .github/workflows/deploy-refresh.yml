@@ -1,0 +1,73 @@
+name: Deploy refresh job to Cloud Run
+
+# Builds and updates the ffw-refresh Cloud Run Job whenever a push to main
+# touches the refresh pipeline itself. Jobs don't re-pull `:latest`
+# automatically - gcloud run jobs update with the new digest is what actually
+# rolls it out, same as deploy-api.yml for the service. Same WIF auth as
+# deploy-api.yml - see that file's header for why.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile.refresh"
+      - "Dockerfile.refresh.dockerignore"
+      - "scripts/**"
+      - "embeddings/**"
+      - "pipeline/gcs_sync.py"
+      - "pipeline/cloud_run_restart.py"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/deploy-refresh.yml"
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: fantasy-football-wizard-ffw
+  REGION: us-central1
+  JOB: ffw-refresh
+  IMAGE: us-central1-docker.pkg.dev/fantasy-football-wizard-ffw/ffw-images/refresh
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+        with:
+          python-version: "3.11"
+
+      - run: uv sync --extra refresh --extra dev
+
+      - run: uv run ruff check .
+
+      - run: uv run python -m pytest -q
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/318449489919/locations/global/workloadIdentityPools/github-actions-pool/providers/github-provider
+          service_account: github-actions-deployer@fantasy-football-wizard-ffw.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      - run: |
+          docker build -f Dockerfile.refresh -t "${IMAGE}:${GITHUB_SHA}" -t "${IMAGE}:latest" .
+          docker push "${IMAGE}:${GITHUB_SHA}"
+          docker push "${IMAGE}:latest"
+
+      - run: |
+          gcloud run jobs update "${JOB}" \
+            --image="${IMAGE}:${GITHUB_SHA}" \
+            --region="${REGION}" \
+            --project="${PROJECT_ID}"
