@@ -18,11 +18,11 @@ export default function DecisionCard({ start, bench, confidence, key_factors, ri
     <div className="decision-card">
       <div className="verdict">
         <div className="verdict-start">
-          <span className="verdict-tag">START</span>
+          <span className="verdict-tag">Start</span>
           <span className="verdict-name">{start}</span>
         </div>
         <div className="verdict-bench">
-          <span className="verdict-tag">BENCH</span>
+          <span className="verdict-tag">Bench</span>
           <span className="verdict-name">{bench}</span>
         </div>
       </div>
