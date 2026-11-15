@@ -46,6 +46,19 @@ def _news_item(name, link="https://example.com/a"):
     )
 
 
+@pytest.fixture(autouse=True)
+def _no_disk_player_extraction(monkeypatch):
+    """Every chat() call below passes mentioned_players explicitly, so the real
+    extract_players would only ever run on top of that - and it defaults to
+    known_player_names(), which reads the real data/processed/player_stats.parquet
+    from disk. That file doesn't exist on a fresh checkout (e.g. CI), and these
+    tests aren't about text extraction, so default it to a no-op here. The
+    resolve_chat_players tests that actually exercise extraction override this
+    themselves with their own monkeypatch.setattr call.
+    """
+    monkeypatch.setattr("pipeline.chat_engine.extract_players", lambda message: [])
+
+
 @pytest.fixture
 def stub_run_chat_llm(monkeypatch):
     """Capture what chat() sends to the LLM without spending a real API call."""

@@ -4,7 +4,7 @@ from uuid import uuid4
 import chromadb
 import pytest
 
-from retrieval.news_retriever import NewsItem, retrieve_news
+from retrieval.news_retriever import retrieve_news
 
 
 def _stub_embed(text: str) -> list[float]:

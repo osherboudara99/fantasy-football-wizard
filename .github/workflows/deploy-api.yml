@@ -1,0 +1,79 @@
+name: Deploy API to Cloud Run
+
+# Builds and deploys the FastAPI service (ffw-api) whenever a push to main
+# touches the request-path code or the base image. Authenticates to GCP via
+# Workload Identity Federation - no stored service-account key, a short-lived
+# token is minted per run and scoped to this exact repo (see the
+# github-actions-pool/github-provider setup in the GCP project).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "api/**"
+      - "pipeline/**"
+      - "llm/**"
+      - "retrieval/**"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/deploy-api.yml"
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: fantasy-football-wizard-ffw
+  REGION: us-central1
+  SERVICE: ffw-api
+  IMAGE: us-central1-docker.pkg.dev/fantasy-football-wizard-ffw/ffw-images/api
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+        with:
+          python-version: "3.11"
+
+      - run: uv sync --extra refresh --extra dev
+
+      - run: uv run ruff check .
+
+      - run: uv run python -m pytest -q
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/318449489919/locations/global/workloadIdentityPools/github-actions-pool/providers/github-provider
+          service_account: github-actions-deployer@fantasy-football-wizard-ffw.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      # GitHub's ubuntu-latest runners are linux/amd64 natively - no cross-
+      # platform build flag needed, unlike building this locally on Apple
+      # Silicon.
+      - run: |
+          docker build -t "${IMAGE}:${GITHUB_SHA}" -t "${IMAGE}:latest" .
+          docker push "${IMAGE}:${GITHUB_SHA}"
+          docker push "${IMAGE}:latest"
+
+      # --image alone preserves every other setting already on the service
+      # (env vars, the ANTHROPIC_API_KEY secret, --max-instances=1) - Cloud
+      # Run deploys apply only the flags given, not a full replace.
+      - run: |
+          gcloud run deploy "${SERVICE}" \
+            --image="${IMAGE}:${GITHUB_SHA}" \
+            --region="${REGION}" \
+            --project="${PROJECT_ID}"
