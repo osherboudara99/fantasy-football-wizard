@@ -1,0 +1,25 @@
+name: CI
+
+# Fast feedback on every PR before merge - lint + the full test suite. The
+# deploy workflows (deploy-api.yml, deploy-refresh.yml) run their own copy of
+# this gate on push to main before actually building/deploying anything, so
+# this file alone is just the PR-time safety net.
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+        with:
+          python-version: "3.11"
+
+      - run: uv sync --extra refresh --extra dev
+
+      - run: uv run ruff check .
+
+      - run: uv run python -m pytest -q
