@@ -32,6 +32,25 @@ header {
   color: var(--text);
 }
 
+.byline {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.byline-icon {
+  display: inline-flex;
+  color: var(--text);
+}
+
+.byline-icon:hover,
+.byline-icon:focus-visible {
+  color: var(--text-h);
+}
+
 input[type='number'] {
   font: inherit;
   padding: 8px 10px;
