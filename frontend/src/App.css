@@ -1,7 +1,7 @@
 .app {
   max-width: 640px;
   margin: 0 auto;
-  padding: 24px 20px 16px;
+  padding: 20px 20px 16px;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -11,7 +11,8 @@ header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 12px 20px;
   padding-bottom: 16px;
   margin-bottom: 4px;
   border-bottom: 1px solid var(--border);
@@ -21,9 +22,22 @@ header {
   z-index: 5;
 }
 
-.header-title h1 {
-  font-size: 22px;
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-mark {
+  font-size: 26px;
+  line-height: 1;
+}
+
+.brand-text h1 {
+  font-size: 20px;
+  font-weight: 700;
   margin: 0;
+  letter-spacing: -0.01em;
 }
 
 .subtitle {
@@ -32,31 +46,20 @@ header {
   color: var(--text);
 }
 
-.byline {
-  margin-top: 6px;
+.header-controls {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--text);
-}
-
-.byline-icon {
-  display: inline-flex;
-  color: var(--text);
-}
-
-.byline-icon:hover,
-.byline-icon:focus-visible {
-  color: var(--text-h);
+  gap: 18px;
+  flex-wrap: wrap;
 }
 
 input[type='number'] {
   font: inherit;
-  padding: 8px 10px;
+  font-family: var(--mono);
+  padding: 7px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--field-bg);
+  background: var(--turf-panel);
   color: var(--text-h);
 }
 
@@ -72,13 +75,13 @@ button:focus-visible {
   align-items: center;
   gap: 8px;
   font-size: 13px;
-  font-weight: 600;
-  color: var(--text-h);
+  font-weight: 500;
+  color: var(--text);
   flex-shrink: 0;
 }
 
 .week-label input {
-  width: 76px;
+  width: 68px;
 }
 
 .error {
@@ -89,34 +92,73 @@ button:focus-visible {
 .scoring-settings {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.3rem;
+}
+.scoring-settings-label {
+  font-size: 12px;
+  color: var(--text);
 }
 .scoring-options {
   display: flex;
-  gap: 0.25rem;
+  gap: 0.3rem;
 }
 .scoring-option {
-  padding: 0.25rem 0.6rem;
-  border-radius: 6px;
-  border: 1px solid #ccc;
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
   background: transparent;
+  color: var(--text);
   cursor: pointer;
 }
 .scoring-option.active {
-  background: #2b6cb0;
-  color: white;
-  border-color: #2b6cb0;
+  background: var(--accent);
+  color: #1a1206;
+  border-color: var(--accent);
+  font-weight: 600;
 }
 .scoring-custom {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.4rem;
   max-width: 320px;
+}
+.scoring-custom select,
+.scoring-custom textarea {
+  font: inherit;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--turf-panel);
+  color: var(--text-h);
 }
 .scoring-pending-note {
   margin: 0;
   font-size: 12px;
   color: var(--text);
+}
+
+.app-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px 0 4px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.social-icon {
+  display: inline-flex;
+  color: var(--text);
+}
+
+.social-icon:hover,
+.social-icon:focus-visible {
+  color: var(--accent);
 }
 
 /* Message list */
@@ -137,7 +179,7 @@ button:focus-visible {
 .message {
   max-width: 85%;
   padding: 14px 16px;
-  border-radius: 14px;
+  border-radius: 10px;
   line-height: 1.5;
 }
 
@@ -149,18 +191,18 @@ button:focus-visible {
 .message-user {
   align-self: flex-end;
   background: var(--accent-bg);
-  border-bottom-right-radius: 4px;
+  border-bottom-right-radius: 3px;
 }
 
 .message-assistant {
   align-self: flex-start;
-  background: var(--field-bg);
-  border: 1px solid var(--border);
-  border-bottom-left-radius: 4px;
+  background: var(--turf-panel);
+  border-left: 3px solid var(--line);
+  border-radius: 4px 10px 10px 4px;
 }
 
 .message-error {
-  border: 1px solid var(--danger);
+  border-left-color: var(--danger);
   color: var(--danger);
 }
 
@@ -175,38 +217,43 @@ button:focus-visible {
 
 .verdict {
   display: flex;
-  gap: 12px;
+  gap: 10px;
 }
 
 .verdict-start,
 .verdict-bench {
   flex: 1;
   padding: 12px;
-  border-radius: 8px;
+  border-radius: 6px;
   text-align: center;
 }
 
 .verdict-start {
   background: var(--start-bg);
-  color: var(--start);
+  border-left: 3px solid var(--start);
+  color: var(--text-h);
 }
 
 .verdict-bench {
-  background: var(--bench-bg);
-  color: var(--bench);
+  border: 1px dashed var(--border);
+  color: var(--text);
 }
 
 .verdict-tag {
   display: block;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
   margin-bottom: 4px;
+}
+
+.verdict-start .verdict-tag {
+  color: var(--start);
 }
 
 .verdict-name {
   display: block;
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 600;
 }
 
@@ -218,22 +265,27 @@ button:focus-visible {
   display: flex;
   justify-content: space-between;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-h);
   margin-bottom: 6px;
 }
 
+.confidence-label span:last-child {
+  font-family: var(--mono);
+  font-weight: 600;
+}
+
 .confidence-track {
-  height: 8px;
-  border-radius: 4px;
-  background: var(--bg);
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
   overflow: hidden;
 }
 
 .confidence-fill {
   height: 100%;
   background: var(--accent);
-  border-radius: 4px;
+  border-radius: 3px;
 }
 
 .factors {
@@ -241,13 +293,38 @@ button:focus-visible {
 }
 
 .factors h3 {
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 600;
   margin: 0 0 6px;
+  color: var(--text-h);
 }
 
 .factors ul {
   margin: 0;
-  padding-left: 20px;
+  padding: 0;
+  list-style: none;
+}
+
+.factors li {
+  position: relative;
+  padding-left: 18px;
+  margin-bottom: 4px;
+}
+
+.factors li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--start);
+}
+
+.factors.risk li::before {
+  background: var(--danger);
+  border-radius: 1px;
 }
 
 .factors.risk h3 {
@@ -298,7 +375,7 @@ button:focus-visible {
 .debug-view pre {
   margin-top: 8px;
   padding: 12px;
-  background: var(--bg);
+  background: var(--turf);
   border-radius: 8px;
   white-space: pre-wrap;
   font-family: var(--mono);
@@ -323,10 +400,10 @@ button:focus-visible {
 .chat-input textarea {
   flex: 1;
   font: inherit;
-  padding: 10px 12px;
+  padding: 10px 14px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: var(--field-bg);
+  background: var(--turf-panel);
   color: var(--text-h);
   resize: none;
   min-height: 44px;
@@ -336,13 +413,18 @@ button:focus-visible {
 .chat-input button[type='submit'] {
   font: inherit;
   font-weight: 600;
-  padding: 10px 18px;
+  padding: 10px 20px;
   border: none;
-  border-radius: 10px;
+  border-radius: 999px;
   background: var(--accent);
-  color: white;
+  color: #1a1206;
   cursor: pointer;
   white-space: nowrap;
+  transition: filter 0.15s ease;
+}
+
+.chat-input button[type='submit']:not(:disabled):hover {
+  filter: brightness(1.08);
 }
 
 .chat-input button[type='submit']:disabled {
@@ -358,10 +440,10 @@ button:focus-visible {
   margin: 0 0 8px;
   padding: 6px;
   list-style: none;
-  background: var(--bg);
+  background: var(--turf-panel);
   border: 1px solid var(--border);
   border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
   max-height: 220px;
   overflow-y: auto;
   z-index: 10;
@@ -382,5 +464,5 @@ button:focus-visible {
 
 .mention-suggestions li button:hover,
 .mention-suggestions li button:focus-visible {
-  background: var(--field-bg);
+  background: var(--line);
 }
