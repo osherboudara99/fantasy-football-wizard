@@ -6,6 +6,12 @@ import ScoringSettings, { loadStoredScoringRules } from './ScoringSettings'
 import SocialLinks from './SocialLinks'
 import './App.css'
 
+const SUGGESTED_QUESTIONS = [
+  'Should I start Christian McCaffrey this week?',
+  'Compare Puka Nacua and Nico Collins for my flex',
+  "Is now a good time to trade for Ja'Marr Chase?",
+]
+
 function App() {
   const [players, setPlayers] = useState([])
   const [playersError, setPlayersError] = useState(null)
@@ -73,7 +79,7 @@ function App() {
               type="number"
               min="1"
               max="22"
-              placeholder="upcoming"
+              placeholder="auto"
               value={week}
               onChange={(e) => setWeek(e.target.value)}
             />
@@ -84,6 +90,25 @@ function App() {
       {playersError && <p className="error">Couldn't load players: {playersError}</p>}
 
       <div className="message-list">
+        {messages.length === 0 && (
+          <div className="empty-state">
+            <span className="empty-state-mark" aria-hidden="true">🏈</span>
+            <h2>Ask your first question</h2>
+            <p>Get a start/sit call backed by real stats, news, and the reasoning behind it.</p>
+            <div className="suggestion-chips">
+              {SUGGESTED_QUESTIONS.map((question) => (
+                <button
+                  key={question}
+                  type="button"
+                  onClick={() => handleSend(question, [])}
+                  disabled={submitting}
+                >
+                  {question}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {messages.map((message, i) => (
           <MessageBubble key={i} {...message} />
         ))}

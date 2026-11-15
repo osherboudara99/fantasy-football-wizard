@@ -29,8 +29,16 @@ header {
 }
 
 .brand-mark {
-  font-size: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  font-size: 19px;
   line-height: 1;
+  background: var(--flag-bg);
+  border-radius: 10px;
+  flex-shrink: 0;
 }
 
 .brand-text h1 {
@@ -81,7 +89,20 @@ button:focus-visible {
 }
 
 .week-label input {
-  width: 68px;
+  width: 56px;
+  text-align: center;
+}
+
+/* The native up/down spinner overlapped short placeholder text at this
+   width - this is a rare/optional field, not a stepper people click. */
+.week-label input::-webkit-inner-spin-button,
+.week-label input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.week-label input[type='number'] {
+  -moz-appearance: textfield;
 }
 
 .error {
@@ -174,6 +195,67 @@ button:focus-visible {
   gap: 16px;
   padding: 8px 0 20px;
   overflow-y: auto;
+}
+
+.empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 8px;
+  padding: 32px 16px;
+  color: var(--text);
+}
+
+.empty-state-mark {
+  font-size: 34px;
+  margin-bottom: 6px;
+}
+
+.empty-state h2 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.empty-state p {
+  max-width: 36ch;
+  font-size: 14px;
+}
+
+.suggestion-chips {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  width: 100%;
+  max-width: 420px;
+}
+
+.suggestion-chips button {
+  font: inherit;
+  font-size: 13.5px;
+  width: 100%;
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--turf-panel);
+  color: var(--text-h);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease;
+}
+
+.suggestion-chips button:hover,
+.suggestion-chips button:focus-visible {
+  border-color: var(--accent);
+}
+
+.suggestion-chips button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .message {
