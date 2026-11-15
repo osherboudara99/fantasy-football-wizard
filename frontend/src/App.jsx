@@ -80,6 +80,21 @@ function App() {
                   8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
               </svg>
             </a>
+            <a
+              href="https://www.linkedin.com/in/osher-boudara-a612921b5/"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Osher Boudara on LinkedIn"
+              className="byline-icon"
+            >
+              <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">
+                <path d="M14.82 0H1.18A1.18 1.18 0 0 0 0 1.18v13.64A1.18 1.18 0 0 0 1.18 16h13.64
+                  A1.18 1.18 0 0 0 16 14.82V1.18A1.18 1.18 0 0 0 14.82 0ZM4.75 13.6H2.37V6h2.38
+                  v7.6ZM3.56 4.96a1.38 1.38 0 1 1 0-2.76 1.38 1.38 0 0 1 0 2.76ZM13.64 13.6h-2.38
+                  V9.9c0-.88-.02-2.02-1.23-2.02-1.23 0-1.42.96-1.42 1.96v3.76H6.24V6h2.28v1.04h.03
+                  c.32-.6 1.1-1.23 2.26-1.23 2.42 0 2.87 1.59 2.87 3.66v4.13Z"/>
+              </svg>
+            </a>
           </p>
         </div>
         <ScoringSettings onRulesChange={setScoringRules} />
