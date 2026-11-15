@@ -1,19 +1,36 @@
+/* "Night game" token system - a scoreboard under the lights, not a generic
+   dark SaaS theme: deep turf green rather than neutral black, one warm
+   stadium-light accent, and a mono face reserved for real stat digits
+   (confidence %, week number, points) rather than decorative labels. */
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --field-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --start: #1a9c53;
-  --start-bg: rgba(26, 156, 83, 0.1);
-  --bench: #6b6375;
-  --bench-bg: rgba(107, 99, 117, 0.08);
-  --danger: #d1293d;
+  --turf: #f4f6f3;
+  --turf-panel: #ffffff;
+  --chalk: #142019;
+  --chalk-dim: #5c6b63;
+  --line: #dce3de;
+  --field-bg: #eef1ec;
+  --flag: #b5750a;
+  --flag-bg: rgba(181, 117, 10, 0.1);
+  --go: #1a9c53;
+  --go-bg: rgba(26, 156, 83, 0.1);
+  --foul: #d1293d;
+  --foul-bg: rgba(209, 41, 61, 0.08);
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+  /* Back-compat aliases used throughout the existing component CSS. */
+  --text: var(--chalk-dim);
+  --text-h: var(--chalk);
+  --bg: var(--turf);
+  --border: var(--line);
+  --accent: var(--flag);
+  --accent-bg: var(--flag-bg);
+  --start: var(--go);
+  --start-bg: var(--go-bg);
+  --bench: var(--chalk-dim);
+  --bench-bg: rgba(92, 107, 99, 0.08);
+  --danger: var(--foul);
+
+  --sans: 'Space Grotesk', system-ui, 'Segoe UI', sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, Consolas, monospace;
 
   font: 18px/145% var(--sans);
   color-scheme: light dark;
@@ -31,18 +48,20 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --field-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --start: #4ade80;
-    --start-bg: rgba(74, 222, 128, 0.12);
-    --bench: #9ca3af;
-    --bench-bg: rgba(156, 163, 175, 0.1);
-    --danger: #f87171;
+    --turf: #0d1613;
+    --turf-panel: #16211c;
+    --chalk: #f1f3ee;
+    --chalk-dim: #8b9992;
+    --line: #273530;
+    --field-bg: #16211c;
+    --flag: #ffb020;
+    --flag-bg: rgba(255, 176, 32, 0.14);
+    --go: #4ade80;
+    --go-bg: rgba(74, 222, 128, 0.12);
+    --foul: #ff6b6b;
+    --foul-bg: rgba(255, 107, 107, 0.1);
+
+    --bench-bg: rgba(139, 153, 146, 0.1);
   }
 }
 
