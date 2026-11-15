@@ -29,7 +29,7 @@ Backend (from repo root, venv active):
 ```zsh
 uvicorn api.main:app --reload
 ```
-Serves on `http://localhost:8000` (`GET /health`, `GET /players`, `POST /recommendation`).
+Serves on `http://localhost:8000` (`GET /health`, `GET /players`, `POST /chat`, `POST /scoring-rules`).
 
 Frontend (separate terminal):
 ```zsh
@@ -59,8 +59,9 @@ Ordered execution plan. Each phase references the detailed sections below; a pha
 | **3. Decision engine end-to-end** *(done)* | `pipeline/decision_engine.py`: context builder → `run_llm()` → `Recommendation` | §8–§9 | A real two-player question answers correctly from the terminal |
 | **4. FastAPI backend** *(done)* | `api/main.py` with `POST /recommendation` and `GET /players`; `.env` loaded at startup; CORS for frontend origin | §14 | `curl` returns a recommendation JSON |
 | **5. React frontend** *(done)* | `frontend/` Vite app: player pickers, question input, recommendation + confidence display | §10 | Full flow works locally against FastAPI |
-| **6. News RAG** *(done)* | `scripts/refresh_news.py` (RSS feeds); `embeddings/build_embeddings.py` (sentence-transformers → Chroma, player-ID + date metadata); `retrieval/news_retriever.py` (top-k, ≤7-day filter); wire into context builder | §4, §6.2 | Recommendations cite recent news |
-| **7. Deployment** | Dockerfile (no torch in API image); Cloud Run service; GCS-backed data/Chroma; Cloud Run Jobs + Scheduler for refresh; Cloudflare Pages frontend; **rate limiting on `POST /recommendation`** (decided Aug 2026 — see §14) | §13, §14 | Public URL serves a recommendation |
+| **6. News RAG** *(done)* | `scripts/refresh_news.py` (RSS feeds); `embeddings/build_embeddings.py` (Chroma's built-in ONNX embedding function → Chroma, player-ID + date metadata); `retrieval/news_retriever.py` (top-k, ≤7-day filter); wire into context builder | §4, §6.2 | Recommendations cite recent news |
+| **Chat assistant** *(done, inserted before Phase 7)* | `POST /chat` replaces `POST /recommendation`; free-form start/sit, trade, and single-player questions over any number of mentioned players; custom league scoring tiers via `POST /scoring-rules` | §7a, §14 | Chat UI answers start/sit, trade, and scoring-tier questions |
+| **7. Deployment** *(done)* | Dockerfile (no torch in API image); Cloud Run service (`--max-instances=1`); GCS-backed data/Chroma; Cloud Run Job + Cloud Scheduler for refresh (forces a new Cloud Run revision after each refresh to resolve staleness); Cloudflare (Workers + static assets) frontend; rate limiting on `POST /chat` | §13, §14 | Public URL serves a chat answer — **live** |
 | **8. Evaluation** | Log recommendations vs FantasyPros consensus and actual weekly outcomes | §12 | Week-over-week agreement tracking exists |
 
 
@@ -84,14 +85,20 @@ This mirrors real-world production LLM systems.
 ## 0. Project Definition
 
 ### Goal
-Build a **decision-support system** (not just a chatbot) for fantasy football start/sit and flex decisions.
+A conversational decision-support tool for fantasy football: a chat interface
+(revised 2026-09-09 from an earlier "not a chatbot" scoping) that combines structured
+NFL stats/projections with RAG over fantasy news to answer start/sit, flex, and trade
+questions, with cited sources.
 
 ### Non-Goals (v1)
-- Draft strategy
-- Trades
+- Draft strategy (deferred — needs new ADP/rankings data, not dropped)
 - Waiver wire optimization
 - DFS or betting advice
 - Full-season simulations
+
+Trade evaluation was originally a non-goal but moved into scope 2026-09-09 — it
+reuses the existing stats/news context with no dedicated value model, and is answered
+by the same `POST /chat` endpoint as start/sit questions.
 
 These may be considered future extensions.
 
@@ -104,8 +111,8 @@ These may be considered future extensions.
 ### Core
 - **Python 3.10+**
 - **LLM**: Claude API (`anthropic` SDK) — `claude-haiku-4-5` default, overridable via `ANTHROPIC_MODEL` (e.g. `claude-sonnet-5` for harder reasoning)
-- **Embeddings**: `sentence-transformers`
-- **Vector Database**: Chroma (local)
+- **Embeddings**: Chroma's bundled ONNX embedding function (`all-MiniLM-L6-v2` via `onnxruntime`) — switched off `sentence-transformers`/torch in Nov 2026 to keep the refresh job's own image lean; same model, no extra heavy dependency
+- **Vector Database**: Chroma (local dev), GCS-backed in production
 - **UI**: React frontend + FastAPI backend (see section 14)
 
 ### Data & Processing
@@ -168,23 +175,26 @@ fantasy-football-wizard/
 |-- pipeline/
 |   |-- entity_extraction.py
 |   |-- context_builder.py
-|   `-- decision_engine.py
+|   |-- decision_engine.py
+|   |-- gcs_sync.py        # sync_from_gcs() / sync_to_gcs() - API startup + refresh job
+|   `-- cloud_run_restart.py  # forces a new Cloud Run revision after a refresh
 |-- api/
 |   `-- main.py            # FastAPI app
-|-- frontend/              # React (Vite) app
+|-- frontend/              # React (Vite) app; wrangler.toml for the Cloudflare deploy
 |-- scripts/
 |   |-- refresh_stats.py
 |   |-- refresh_news.py
-|   `-- refresh_embeddings.py
+|   `-- refresh_job_entrypoint.py  # Cloud Run Job entrypoint: stats -> news -> embeddings -> GCS -> restart
 |-- tests/                 # pytest, test_*.py
-|-- Dockerfile             # API image (Phase 7; no torch)
+|-- Dockerfile             # API image (no torch)
+|-- Dockerfile.refresh     # refresh-job image (refresh extra: nflreadpy/pandas)
 |-- .env.example
 |-- pyproject.toml
 |-- uv.lock
 `-- README.md
 ```
 
-Only `llm/interface.py` exists today — everything else is created phase-by-phase per the roadmap.
+All phases through 7 are implemented and deployed; only Phase 8 (Evaluation) remains unbuilt.
 
 
 ---
@@ -277,8 +287,7 @@ notes
 **Recommended Tools**
 - `requests` / `httpx` for fetching news
 - `BeautifulSoup` (if scraping is required)
-- `sentence-transformers` for embeddings
-- Chroma for vector search
+- Chroma for vector search, embedding via its bundled ONNX function (no torch)
 
 **Why**
 - News is unstructured, subjective, and time-sensitive
@@ -305,8 +314,7 @@ notes
 ### 4.2 Embeddings Pipeline (RAG)
 
 **Tools**
-- `sentence-transformers`
-- Chroma
+- Chroma, embedding via its bundled ONNX function (`all-MiniLM-L6-v2`, no torch)
 
 **Steps**
 - Chunk news articles by player and article
@@ -543,9 +551,11 @@ UI for interacting with the fantasy assistant.
 - Debug view showing injected context
 
 **Post-deployment backlog** (raised by the user after the Phase 5 done-check passed, 2026-08-06 — deliberately deferred: ship Phase 5 as-is, deploy per Phase 7, then iterate):
-- Replace the `<select>` player pickers with a searchable/typeahead input — the full player list is too long to scan
-- Add defense/DST options so team defenses can be compared, not just offensive skill players (needs a defense data source — none of the current nflreadpy/Sleeper tables used are wired for DST; scope during implementation)
-- Personal branding on the page: the user's name plus links to their LinkedIn and GitHub
+- ~~Replace the `<select>` player pickers with a searchable/typeahead input~~ — done, superseded by `@`-mention search in the chat UI
+- Add defense/DST options so team defenses can be compared, not just offensive skill players (needs a defense data source — none of the current nflreadpy/Sleeper tables used are wired for DST; scope during implementation) — **still open**
+- ~~Personal branding on the page: the user's name plus links to their LinkedIn and GitHub~~ — done (2026-11-14): header byline + footer credit line, `frontend/src/SocialLinks.jsx`
+
+**Deferred (not yet scheduled)**: a roster-photo lineup assistant — upload an ESPN/Sleeper roster screenshot, get start/sit and full-lineup-optimization answers against it. Design in `docs/superpowers/specs/2026-11-14-roster-photo-lineup-design.md`.
 
 ---
 
@@ -565,7 +575,7 @@ UI for interacting with the fantasy assistant.
 
 Scheduling:
 - Local dev: run refresh scripts manually or via OS scheduler
-- Production: Cloud Run Jobs triggered by Cloud Scheduler (see §13) — stats weekly, news daily, embeddings rebuilt after each news refresh
+- Production: a single Cloud Run Job triggered daily by Cloud Scheduler (see §13) — bundles stats, news, and embeddings into one atomic run rather than separate cadences, since the staleness fix needs one complete snapshot before restarting the API service anyway
 
 ---
 ## 12. Evaluation (Lightweight)
@@ -578,14 +588,16 @@ Scheduling:
 ---
 ## 13. Deployment
 
+**Status: live** (since 2026-11-14). Backend, data, refresh automation, and frontend are all deployed and verified talking to each other.
+
 - Local dev: FastAPI (`uvicorn`) + React dev server (Vite)
-- **Frontend**: Cloudflare Pages — free tier, unlimited static bandwidth, deploys the Vite build on git push
-- **Backend**: Dockerized FastAPI on GCP Cloud Run — scale-to-zero, free tier (~2M requests/month) covers personal use
-- **Data refresh**: Cloud Run Jobs + Cloud Scheduler (replaces local cron); artifacts written to a GCS bucket
-- **State caveat**: Cloud Run is stateless/ephemeral — Parquet files and `chroma_db/` must live in GCS, not on local disk. **Implemented**: `pipeline/gcs_sync.py`'s `sync_from_gcs()` downloads them into the same local paths at FastAPI startup (a lifespan hook, gated on the `GCS_BUCKET` env var — unset in local dev, so nothing changes there). Download-on-start was chosen over a GCS FUSE volume mount because Chroma's SQLite backend needs file-locking semantics FUSE doesn't reliably support; still needs a real bucket populated by the refresh job before this can be exercised end-to-end.
-- **Staleness caveat (open, not yet resolved)**: the sync only runs once, at startup. A Cloud Run instance that stays warm across requests will keep serving the data it downloaded at its last cold start, even after the scheduled refresh job (not yet built) writes newer data to the bucket — there's no in-process re-sync. This needs a decision once the refresh job + Cloud Scheduler pieces below actually exist: either the API polls the bucket periodically, or the refresh job forces a new Cloud Run revision/restart after publishing a complete snapshot. Deferred rather than guessed at now, since there's no scheduler to hook into yet.
-- **Cold-start caveat**: keep `sentence-transformers` (torch) out of the request path — embed at refresh time in the Cloud Run Job; the API container should only *query* Chroma. Otherwise scale-to-zero cold starts take tens of seconds and the image balloons past 2GB.
-- Fallback if statefulness gets annoying: a small always-on VM (Fly.io / Lightsail, ~$5/mo) with a persistent volume
+- **Frontend**: Cloudflare — Workers + static assets (Cloudflare's dashboard merged the old separate "Pages" product into this flow during 2026); `frontend/wrangler.toml` configures the static-assets deploy; live at a `*.workers.dev` URL and the custom domain `fantasy-football-wizard.osherboudara.com`
+- **Backend**: Dockerized FastAPI on GCP Cloud Run (`ffw-api`, project `fantasy-football-wizard-ffw`, region `us-central1`), `--max-instances=1` (load-bearing — see §14's rate limiting)
+- **Data refresh**: a Cloud Run Job (`ffw-refresh`, `Dockerfile.refresh`, 2Gi memory/2 CPU) triggered by Cloud Scheduler (`ffw-refresh-daily`, `0 8 * * *` UTC) — bundles stats/news/embeddings into one atomic run rather than separate schedules, writes to the `ffw-data` GCS bucket
+- **State caveat — resolved**: Cloud Run is stateless/ephemeral — Parquet files and `chroma_db/` live in GCS, not on local disk. `pipeline/gcs_sync.py`'s `sync_from_gcs()` downloads them into the same local paths at FastAPI startup (a lifespan hook, gated on the `GCS_BUCKET` env var — unset in local dev, so nothing changes there). Download-on-start was chosen over a GCS FUSE volume mount because Chroma's SQLite backend needs file-locking semantics FUSE doesn't reliably support.
+- **Staleness caveat — resolved**: the refresh job's last step (`pipeline/cloud_run_restart.py`) touches an annotation on the `ffw-api` Cloud Run service via the `google-cloud-run` client, which forces a new revision and therefore a fresh `sync_from_gcs()` — a warm instance now picks up each day's refreshed data without a manual restart.
+- **Cold-start caveat**: no heavy embedding dependency sits in the request path at all — `embeddings/build_embeddings.py` uses Chroma's bundled ONNX embedding function (not `sentence-transformers`/torch), so there is no torch anywhere in this project, in either image.
+- `sync_to_gcs()` (also in `pipeline/gcs_sync.py`) is the refresh job's upload counterpart to `sync_from_gcs()`.
 
 ---
 
@@ -606,7 +618,7 @@ Benefits include:
 - **Debugging:** Endpoints can be tested independently with tools like Postman or `curl`.
 - **Resume Value:** Demonstrates experience building a production-ready ML API.
 
-### Rate limiting (done, code-level; Cloud Armor still pending actual deploy)
+### Rate limiting (done, live)
 
 `POST /chat` spends the owner's Anthropic credits on every call, and CORS is not a
 defense — it only constrains browsers, and `curl` ignores it entirely. The input caps
@@ -619,15 +631,12 @@ cost of a single request but not the number of requests.
 itself appends and a caller can't forge, not the leftmost caller-supplied one);
 `/players` and `/health` are unlimited since they cost no LLM call.
 
-**Deploy-time requirement, not yet applied (no Cloud Run service exists yet)**: the
-limiter's counters are in-memory per instance, not shared across replicas. Under
-Cloud Run's default autoscaling, one caller triggering the limit is itself the kind of
-burst that can spin up a second instance — which starts with an empty counter and
-grants that same caller another 30/hour. **Before this ships publicly, the Cloud Run
-service must be deployed with `--max-instances=1`** (fine at personal-use traffic
-levels) so the in-process limiter stays meaningful; if scale-out is ever needed, a
-**Cloud Armor rate-limit policy** in front of Cloud Run replaces this in-process limit
-entirely — see Phase 7 below.
+**Deployed with the required constraint**: the limiter's counters are in-memory per
+instance, not shared across replicas, so the live `ffw-api` Cloud Run service is
+deployed with `--max-instances=1` (fine at personal-use traffic levels) to keep the
+in-process limiter meaningful. If scale-out is ever needed, a **Cloud Armor
+rate-limit policy** in front of Cloud Run would replace this in-process limit —
+not needed to date.
 
 `/docs`, `/redoc`, and `/openapi.json` are **disabled in prod**: `api/main.py`'s
 `_docs_config()` passes `docs_url=None, redoc_url=None, openapi_url=None` to `FastAPI()`
@@ -636,8 +645,13 @@ elsewhere in this file); local dev keeps them on.
 
 ### Example FastAPI Endpoint
 
+Illustrative only, from early planning — the real endpoint is `POST /chat`
+(`api/main.py`), which takes a free-form message plus optional mentioned players,
+history, and scoring rules, not a fixed `players`/`week` pair. See `api/main.py`
+directly for the current request/response shapes.
+
 ```python
-# api/main.py
+# api/main.py (early sketch, superseded by POST /chat)
 from fastapi import FastAPI
 from pydantic import BaseModel
 from pipeline.context_builder import build_context
